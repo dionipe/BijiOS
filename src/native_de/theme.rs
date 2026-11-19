@@ -397,6 +397,8 @@ button.dock-btn:hover {
 .icon-pancer     { background-image: linear-gradient(145deg, #1E4D38 0%, #0D241E 100%); }
 .icon-wordcraft  { background-image: linear-gradient(145deg, #60a5fa 0%, #1d4ed8 100%); }
 .icon-gridcraft  { background-image: linear-gradient(145deg, #7FBF6A 0%, #2F7D4F 100%); }
+.icon-deckcraft  { background-image: linear-gradient(145deg, #fb923c 0%, #c2410c 100%); }
+.icon-pdfcraft   { background-image: linear-gradient(145deg, #f87171 0%, #b91c1c 100%); }
 .icon-notes      { background-image: linear-gradient(145deg, #F3B95F 0%, #E8A33D 100%); }
 .icon-calculator { background-image: linear-gradient(145deg, #fb923c 0%, #ea580c 100%); }
 .icon-activity   { background-image: linear-gradient(145deg, #2dd4bf 0%, #0f766e 100%); }

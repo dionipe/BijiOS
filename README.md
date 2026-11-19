@@ -41,7 +41,7 @@ It features a cohesive botanical identity (**BijiOS v1.0.0 "Padi"**) with macOS-
 - **Semai — App Launcher**: Proportional squircle launcher combining built-in BijiOS apps and all installed Linux `.deb` applications with instant search.
 - **Bibit — Debian App Store**: Curated Debian desktop catalog + live `apt-cache search`, `dpkg-query` status detection, and one-click `pkexec apt-get` install/remove with automatic launcher sync.
 - **Pancer — Native Terminal**: Full interactive Linux PTY/TTY `/bin/bash` terminal powered by `libvte-2.91-gtk4` (ANSI 256-color, `vim`, `nano`, `htop`, `sudo`, tab-completion, history, Copy/Paste/Clear).
-- **WordCraft & GridCraft**: Native document (`.docx`) and spreadsheet (`.xlsx`) editors backed by Pure Rust OpenXML engines.
+- **WordCraft, GridCraft, DeckCraft & PDFCraft**: Bundled pure-Rust native office suite by **Storytold / ArtCraft** (Apache License 2.0) — integrated directly into the Dock, **Semai**, and **Akar** file associations (`.docx`, `.xlsx`, `.pptx`, `.pdf`).
 - **BijiOS Notes, Calculator & Activity Monitor**: Markdown notes, native calculator, and live `/proc` CPU/RAM/process monitor.
 - **System Settings**:
   - **Desktop & Dock**: Live & persisted Dock Size (`32–64 px`), Magnification (`1.0x–1.6x`), Position (`Bottom` / `Left` / `Right`), Minimize Effect (`Genie` / `Scale`), and Animate Opening Applications.
@@ -99,12 +99,27 @@ bash packaging/build-deb.sh
 
 ```bash
 sudo apt-get install -y ./dist/bijios-desktop_1.0.0_amd64.deb
+bash packaging/bundle-storytold.sh
 sudo systemctl restart lightdm
 ```
+
+---
+
+## Bundled Open-Source Suite & Credits (Apache License 2.0)
+
+BijiOS Desktop bundles and integrates the following pure Rust office applications under their original names, in compliance with the **Apache License 2.0** (see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)):
+
+| Application | Version | Description | Upstream Repository | License |
+| :--- | :--- | :--- | :--- | :--- |
+| **WordCraft** | `0.18.1` | Clean-room native word processor in pure Rust | https://github.com/storytold/wordcraft | Apache-2.0 |
+| **GridCraft** | `0.19.1` | Clean-room native spreadsheet in pure Rust | https://github.com/storytold/gridcraft | Apache-2.0 |
+| **DeckCraft** | `0.18.1` | Clean-room native presentation app in pure Rust | https://github.com/storytold/deckcraft | Apache-2.0 |
+| **PDFCraft** | `0.21.1` | Native PDF reader & editor written from scratch in Rust | https://github.com/storytold/pdfcraft | Apache-2.0 |
 
 ---
 
 ## Infrastructure & Credits
 
 - **OS & Desktop**: BijiOS v1.0.0 ("Padi")
+- **Bundled Office Suite**: Storytold / ArtCraft ([https://github.com/storytold](https://github.com/storytold)) — Apache License 2.0
 - **Cloud & Virtualization Host**: Powered by **IDVE Cloud / KVM** ([https://idve.cloud/](https://idve.cloud/))

@@ -665,13 +665,15 @@ unsafe fn build_desktop_shell(
     // =========================================================================
     // 3. Liquid Glass Floating Dock (Live Size, Magnification, Position & Bounce)
     // =========================================================================
-    let dock_items: [(&str, &str, &str, &str); 12] = [
+    let dock_items: [(&str, &str, &str, &str); 14] = [
         ("finder", "📁", "Akar - File Manager", "icon-finder"),
         ("launchpad", "🚀", "Semai - App Launcher", "icon-launchpad"),
         ("bibit", "🛍️", "Bibit - Debian App Store", "icon-bibit"),
         ("pancer", "💻", "Pancer - Terminal", "icon-pancer"),
-        ("wordcraft", "📝", "WordCraft (Document Editor)", "icon-wordcraft"),
-        ("gridcraft", "📊", "GridCraft (Spreadsheet)", "icon-gridcraft"),
+        ("wordcraft", "📝", "WordCraft (Storytold — Apache-2.0)", "icon-wordcraft"),
+        ("gridcraft", "📊", "GridCraft (Storytold — Apache-2.0)", "icon-gridcraft"),
+        ("deckcraft", "📽️", "DeckCraft (Storytold — Apache-2.0)", "icon-deckcraft"),
+        ("pdfcraft", "📕", "PDFCraft (Storytold — Apache-2.0)", "icon-pdfcraft"),
         ("notes", "🗒️", "BijiOS Notes", "icon-notes"),
         ("calculator", "🧮", "Calculator", "icon-calculator"),
         ("activity", "📈", "Activity Monitor", "icon-activity"),
@@ -713,6 +715,8 @@ unsafe fn build_desktop_shell(
                 "pancer" => apps::open_pancer(app),
                 "wordcraft" => apps::open_wordcraft(app, None),
                 "gridcraft" => apps::open_gridcraft(app),
+                "deckcraft" => apps::open_deckcraft(None),
+                "pdfcraft" => apps::open_pdfcraft(None),
                 "notes" => apps::open_notes(app),
                 "calculator" => apps::open_calculator(app),
                 "activity" => apps::open_activity_monitor(app),

@@ -28,6 +28,9 @@ chmod 755 "${BUILD_ROOT}/usr/bin/bijios-desktop" \
 
 mkdir -p "${BUILD_ROOT}/usr/share/bijios-desktop/static"
 cp -a "${ROOT_DIR}/static/." "${BUILD_ROOT}/usr/share/bijios-desktop/static/"
+if [ -f "${ROOT_DIR}/THIRD_PARTY_LICENSES.md" ]; then
+  cp "${ROOT_DIR}/THIRD_PARTY_LICENSES.md" "${BUILD_ROOT}/usr/share/bijios-desktop/THIRD_PARTY_LICENSES.md"
+fi
 
 chmod 755 "${BUILD_ROOT}/DEBIAN" "${BUILD_ROOT}/DEBIAN/postinst" "${BUILD_ROOT}/DEBIAN/prerm"
 chmod 644 "${BUILD_ROOT}/DEBIAN/control"

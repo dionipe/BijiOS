@@ -79,7 +79,11 @@ pub fn scan_installed_deb_apps() -> Vec<NativeDesktopApp> {
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
                 .to_string();
-            if id.is_empty() || id.contains("bijios") || id.contains("dokuhub") {
+            if id.is_empty()
+                || id.contains("bijios")
+                || id.contains("dokuhub")
+                || id.starts_with("ai.storyteller.")
+            {
                 continue;
             }
 
@@ -460,7 +464,15 @@ pub fn open_finder(app: *mut GtkApplication) {
                         (pop_c.borrow())();
                     } else {
                         let lower = p_open.to_string_lossy().to_lowercase();
-                        if lower.ends_with(".txt") || lower.ends_with(".md") || lower.ends_with(".rs") || lower.ends_with(".json") || lower.ends_with(".toon") {
+                        if lower.ends_with(".docx") || lower.ends_with(".doc") || lower.ends_with(".odt") || lower.ends_with(".rtf") {
+                            open_wordcraft(app, Some(p_open.clone()));
+                        } else if lower.ends_with(".xlsx") || lower.ends_with(".xls") || lower.ends_with(".csv") || lower.ends_with(".ods") {
+                            open_gridcraft_with_file(app, Some(p_open.clone()));
+                        } else if lower.ends_with(".pptx") || lower.ends_with(".ppt") || lower.ends_with(".odp") {
+                            open_deckcraft(Some(p_open.clone()));
+                        } else if lower.ends_with(".pdf") {
+                            open_pdfcraft(Some(p_open.clone()));
+                        } else if lower.ends_with(".txt") || lower.ends_with(".md") || lower.ends_with(".rs") || lower.ends_with(".json") || lower.ends_with(".toon") {
                             open_wordcraft(app, Some(p_open.clone()));
                         } else {
                             let _ = Command::new("xdg-open")
@@ -657,6 +669,8 @@ pub fn open_launchpad(
                     ("pancer", "💻", "icon-pancer", "Pancer - Terminal"),
                     ("wordcraft", "📝", "icon-wordcraft", "WordCraft"),
                     ("gridcraft", "📊", "icon-gridcraft", "GridCraft"),
+                    ("deckcraft", "📽️", "icon-deckcraft", "DeckCraft"),
+                    ("pdfcraft", "📕", "icon-pdfcraft", "PDFCraft"),
                     ("notes", "🗒️", "icon-notes", "BijiOS Notes"),
                     ("calculator", "🧮", "icon-calculator", "Calculator"),
                     ("activity", "📈", "icon-activity", "Activity Monitor"),
@@ -693,6 +707,8 @@ pub fn open_launchpad(
                             "pancer" => open_pancer(app),
                             "wordcraft" => open_wordcraft(app, None),
                             "gridcraft" => open_gridcraft(app),
+                            "deckcraft" => open_deckcraft(None),
+                            "pdfcraft" => open_pdfcraft(None),
                             "notes" => open_notes(app),
                             "calculator" => open_calculator(app),
                             "activity" => open_activity_monitor(app),
@@ -752,10 +768,36 @@ pub fn open_launchpad(
     }
 }
 
+fn spawn_bundled_storytold(bin_path: &str, file: Option<PathBuf>) -> bool {
+    if !std::path::Path::new(bin_path).exists() {
+        return false;
+    }
+    let mut cmd = Command::new(bin_path);
+    if let Some(p) = file {
+        cmd.arg(p);
+    }
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .is_ok()
+}
+
+pub fn open_deckcraft(initial_file: Option<PathBuf>) {
+    let _ = spawn_bundled_storytold("/usr/bin/deckcraft", initial_file);
+}
+
+pub fn open_pdfcraft(initial_file: Option<PathBuf>) {
+    let _ = spawn_bundled_storytold("/usr/bin/pdfcraft", initial_file);
+}
+
 // ============================================================================
-// 3. BijiOS WordCraft (Native Document Editor)
+// 3. WordCraft (Bundled Storytold Pure Rust Word Processor, Apache-2.0)
 // ============================================================================
 pub fn open_wordcraft(app: *mut GtkApplication, initial_file: Option<PathBuf>) {
+    if spawn_bundled_storytold("/usr/bin/wordcraft", initial_file.clone()) {
+        return;
+    }
     unsafe {
         let win = create_app_window(app, "📝 BijiOS WordCraft", 900, 620);
         let root = new_box(GTK_ORIENTATION_VERTICAL, 0, &[]);
@@ -833,9 +875,16 @@ pub fn open_wordcraft(app: *mut GtkApplication, initial_file: Option<PathBuf>) {
 }
 
 // ============================================================================
-// 4. BijiOS GridCraft (Native Spreadsheet)
+// 4. GridCraft (Bundled Storytold Pure Rust Spreadsheet, Apache-2.0)
 // ============================================================================
 pub fn open_gridcraft(app: *mut GtkApplication) {
+    open_gridcraft_with_file(app, None);
+}
+
+pub fn open_gridcraft_with_file(app: *mut GtkApplication, initial_file: Option<PathBuf>) {
+    if spawn_bundled_storytold("/usr/bin/gridcraft", initial_file) {
+        return;
+    }
     unsafe {
         let win = create_app_window(app, "📊 BijiOS GridCraft", 920, 560);
         let root = new_box(GTK_ORIENTATION_VERTICAL, 0, &[]);
@@ -1419,7 +1468,7 @@ pub fn read_cpu_summary() -> String {
 
 pub fn open_about(app: *mut GtkApplication) {
     unsafe {
-        let win = create_app_window(app, "About BijiOS", 620, 560);
+        let win = create_app_window(app, "About BijiOS", 640, 640);
         gtk_window_set_resizable(win, 0);
         let root = new_box(GTK_ORIENTATION_VERTICAL, 14, &[]);
         set_margin_all(root, 24);
@@ -1502,6 +1551,21 @@ pub fn open_about(app: *mut GtkApplication) {
         gtk_box_append(host_card, host_logo);
         gtk_box_append(host_card, host_col);
         gtk_box_append(root, host_card);
+
+        // Bundled Open-Source Office Suite Credits (Storytold — Apache License 2.0)
+        let cred_card = new_box(GTK_ORIENTATION_VERTICAL, 4, &["app-card"]);
+        let c_hdr = new_label("📜 BUNDLED OPEN-SOURCE SUITE CREDITS (APACHE-2.0)", &["app-section-title"]);
+        gtk_label_set_xalign(c_hdr, 0.0);
+        let c_txt = new_label(
+            "WordCraft (v0.18.1), GridCraft (v0.19.1), DeckCraft (v0.18.1), PDFCraft (v0.21.1)\n\
+             By Storytold / ArtCraft (https://github.com/storytold) — Licensed under Apache License 2.0.",
+            &["finder-meta-lbl"],
+        );
+        gtk_label_set_xalign(c_txt, 0.0);
+        gtk_label_set_wrap(c_txt, 1);
+        gtk_box_append(cred_card, c_hdr);
+        gtk_box_append(cred_card, c_txt);
+        gtk_box_append(root, cred_card);
 
         let copy = new_label("™ and © 2024–2027 BijiOS • Hosted on IDVE Cloud (https://idve.cloud/)", &["finder-meta-lbl"]);
         gtk_box_append(root, copy);
