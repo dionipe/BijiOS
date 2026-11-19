@@ -169,26 +169,41 @@ pub fn create_app_window(app: *mut GtkApplication, title: &str, width: i32, heig
         gtk_widget_set_tooltip_text(btn_min, tm.as_ptr());
         gtk_widget_set_tooltip_text(btn_max, tx.as_ptr());
 
-        connect_signal(btn_close, "clicked", move || gtk_window_close(win));
-        connect_signal(btn_min, "clicked", move || {
-            let effect = crate::native_de::get_minimize_effect();
-            let steps: i32 = if effect == "genie" { 5 } else { 3 };
-            let step_counter = Rc::new(RefCell::new(0i32));
-            let sc = Rc::clone(&step_counter);
-            timeout_add_ms(22, move || {
-                let mut cur = sc.borrow_mut();
-                *cur += 1;
-                if *cur <= steps {
-                    let frac = 1.0 - (*cur as f64 / (steps as f64 + 0.5));
-                    gtk_widget_set_opacity(win, frac.max(0.15));
-                    true
-                } else {
-                    gtk_window_minimize(win);
-                    gtk_widget_set_opacity(win, 1.0);
-                    false
-                }
+        let win_alive = Rc::new(std::cell::Cell::new(true));
+        {
+            let wa = Rc::clone(&win_alive);
+            connect_signal(win, "destroy", move || {
+                wa.set(false);
             });
-        });
+        }
+
+        connect_signal(btn_close, "clicked", move || gtk_window_close(win));
+        {
+            let wa = Rc::clone(&win_alive);
+            connect_signal(btn_min, "clicked", move || {
+                let effect = crate::native_de::get_minimize_effect();
+                let steps: i32 = if effect == "genie" { 5 } else { 3 };
+                let step_counter = Rc::new(RefCell::new(0i32));
+                let sc = Rc::clone(&step_counter);
+                let wa2 = Rc::clone(&wa);
+                timeout_add_ms(22, move || {
+                    if !wa2.get() {
+                        return false;
+                    }
+                    let mut cur = sc.borrow_mut();
+                    *cur += 1;
+                    if *cur <= steps {
+                        let frac = 1.0 - (*cur as f64 / (steps as f64 + 0.5));
+                        gtk_widget_set_opacity(win, frac.max(0.15));
+                        true
+                    } else {
+                        gtk_window_minimize(win);
+                        gtk_widget_set_opacity(win, 1.0);
+                        false
+                    }
+                });
+            });
+        }
         connect_signal(btn_max, "clicked", move || {
             if gtk_window_is_maximized(win) != 0 {
                 gtk_window_unmaximize(win);
@@ -202,7 +217,11 @@ pub fn create_app_window(app: *mut GtkApplication, title: &str, width: i32, heig
             gtk_widget_set_opacity(win, 0.25);
             let step = Rc::new(RefCell::new(1i32));
             let st = Rc::clone(&step);
+            let wa = Rc::clone(&win_alive);
             timeout_add_ms(20, move || {
+                if !wa.get() {
+                    return false;
+                }
                 let mut c = st.borrow_mut();
                 *c += 1;
                 let op = (*c as f64 * 0.2).min(1.0);
@@ -1286,9 +1305,17 @@ pub fn open_activity_monitor(app: *mut GtkApplication) {
             set_text_view_text(proc_tv, &lines.join("\n"));
         };
 
+        let act_alive = Rc::new(std::cell::Cell::new(true));
+        {
+            let aa = Rc::clone(&act_alive);
+            connect_signal(win, "destroy", move || {
+                aa.set(false);
+            });
+        }
+
         update_procs();
         timeout_add_sec(2, move || {
-            if gtk_widget_get_visible(win) == 0 {
+            if !act_alive.get() {
                 return false;
             }
             update_procs();

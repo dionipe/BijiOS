@@ -697,12 +697,21 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             });
         }
 
-        // Dynamic Host Detection Timer (updates every tab label live for local vs SSH!)
+        let alive = Rc::new(Cell::new(true));
+        {
+            let a = Rc::clone(&alive);
+            connect_signal(win, "destroy", move || {
+                a.set(false);
+            });
+        }
+
+        // Dynamic Host Detection Timer (safe against window destroy — never touches freed win!)
         {
             let st = Rc::clone(&state);
             let lh = Rc::clone(&local_host);
+            let a = Rc::clone(&alive);
             timeout_add_sec(1, move || {
-                if gtk_widget_get_visible(win) == 0 {
+                if !a.get() {
                     return false;
                 }
                 let s = st.borrow();
@@ -717,10 +726,11 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             });
         }
 
-        // Open initial tab
-        add_tab(initial_dir.unwrap_or_else(home_dir));
-
+        // Attach widget tree & show window BEFORE opening initial tab so focus works cleanly
         gtk_window_set_child(win, overlay);
         gtk_window_present(win);
+
+        // Open initial tab
+        add_tab(initial_dir.unwrap_or_else(home_dir));
     }
 }
