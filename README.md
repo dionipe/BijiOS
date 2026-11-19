@@ -9,6 +9,10 @@
   <em>Liquid Glass Edition • Zero Chromium • Zero External Crates • TOON v4 Storage</em>
 </p>
 
+<p align="center">
+  <img src="Screenshot/About-BijiOS.png" alt="BijiOS Desktop v1.0.0 Padi — About BijiOS &amp; Pancer Terminal" width="900" />
+</p>
+
 ---
 
 ## Overview
