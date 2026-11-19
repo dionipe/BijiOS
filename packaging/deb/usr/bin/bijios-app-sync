@@ -1,0 +1,22 @@
+#!/bin/bash
+# Synchronizes /usr/share/applications/*.desktop into /usr/local/share/applications/
+# so all installed .deb applications launch via /usr/bin/bijios-app-launch inside the user X11 session.
+
+mkdir -p /usr/local/share/applications
+rm -f /usr/local/share/applications/*.desktop 2>/dev/null || true
+
+for src in /usr/share/applications/*.desktop; do
+  [ -f "$src" ] || continue
+  base="$(basename "$src")"
+  case "$base" in
+    bijios.desktop|*dokuhub*) continue ;;
+  esac
+
+  dest="/usr/local/share/applications/${base}"
+  if [ "$base" = "chromium.desktop" ]; then
+    sed -E 's|^Exec=.*|Exec=/usr/bin/bijios-app-launch /usr/bin/chromium --new-window|' "$src" > "$dest"
+  else
+    sed -E 's|^Exec=(/usr/bin/bijios-app-launch )?(.*)|Exec=/usr/bin/bijios-app-launch \2|' "$src" > "$dest"
+  fi
+  chmod 644 "$dest"
+done

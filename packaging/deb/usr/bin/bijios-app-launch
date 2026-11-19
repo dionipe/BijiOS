@@ -1,0 +1,114 @@
+#!/bin/bash
+# Universal X11 Desktop Application Launcher for BijiOS Desktop
+# Ensures native .deb GUI apps launch as the active desktop user on DISPLAY=:0
+# and appear above the BijiOS Desktop shell window.
+
+PRIMARY_USER="$(awk -F: '$3 >= 1000 && $3 < 60000 { print $1; exit }' /etc/passwd || echo dionipe)"
+PRIMARY_UID="$(awk -F: '$3 >= 1000 && $3 < 60000 { print $3; exit }' /etc/passwd || echo 1000)"
+PRIMARY_HOME="$(awk -F: '$3 >= 1000 && $3 < 60000 { print $6; exit }' /etc/passwd || echo /home/dionipe)"
+
+export DISPLAY=":0"
+export XAUTHORITY="${PRIMARY_HOME}/.Xauthority"
+export XDG_RUNTIME_DIR="/run/user/${PRIMARY_UID}"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${PRIMARY_UID}/bus"
+export HOME="${PRIMARY_HOME}"
+
+if [ -f /tmp/.bijios-x11-env ]; then
+  # shellcheck disable=SC1091
+  . /tmp/.bijios-x11-env
+fi
+
+# Switch BijiOS Desktop shell from _NET_WM_STATE_FULLSCREEN to maximized normal layer
+# so Openbox always stacks newly launched native .deb windows above the desktop shell.
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c '
+import ctypes
+
+class XClientMessageEvent(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_int),
+        ("serial", ctypes.c_ulong),
+        ("send_event", ctypes.c_int),
+        ("display", ctypes.c_void_p),
+        ("window", ctypes.c_ulong),
+        ("message_type", ctypes.c_ulong),
+        ("format", ctypes.c_int),
+        ("l0", ctypes.c_long),
+        ("l1", ctypes.c_long),
+        ("l2", ctypes.c_long),
+        ("l3", ctypes.c_long),
+        ("l4", ctypes.c_long),
+        ("pad", ctypes.c_long * 12),
+    ]
+
+try:
+    x11 = ctypes.CDLL("libX11.so.6")
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    dpy = ctypes.c_void_p(x11.XOpenDisplay(None))
+    if dpy:
+        x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        root = x11.XDefaultRootWindow(dpy)
+
+        x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        x11.XInternAtom.restype = ctypes.c_ulong
+        net_client_list = x11.XInternAtom(dpy, b"_NET_CLIENT_LIST", 0)
+        net_wm_state = x11.XInternAtom(dpy, b"_NET_WM_STATE", 0)
+        net_wm_fs = x11.XInternAtom(dpy, b"_NET_WM_STATE_FULLSCREEN", 0)
+        net_wm_max_v = x11.XInternAtom(dpy, b"_NET_WM_STATE_MAXIMIZED_VERT", 0)
+        net_wm_max_h = x11.XInternAtom(dpy, b"_NET_WM_STATE_MAXIMIZED_HORZ", 0)
+
+        actual_type = ctypes.c_ulong()
+        actual_format = ctypes.c_int()
+        nitems = ctypes.c_ulong()
+        bytes_after = ctypes.c_ulong()
+        prop = ctypes.c_void_p()
+
+        rc = x11.XGetWindowProperty(
+            dpy, ctypes.c_ulong(root), ctypes.c_ulong(net_client_list),
+            ctypes.c_long(0), ctypes.c_long(1024), ctypes.c_int(0), ctypes.c_ulong(0),
+            ctypes.byref(actual_type), ctypes.byref(actual_format),
+            ctypes.byref(nitems), ctypes.byref(bytes_after), ctypes.byref(prop)
+        )
+        if rc == 0 and prop.value and nitems.value > 0:
+            wins = ctypes.cast(prop, ctypes.POINTER(ctypes.c_ulong))
+            mask = (1 << 20) | (1 << 19)
+            for i in range(nitems.value):
+                w = wins[i]
+                # Remove fullscreen and ensure maximized
+                ev = XClientMessageEvent()
+                ev.type = 33
+                ev.send_event = 1
+                ev.display = dpy
+                ev.window = w
+                ev.message_type = net_wm_state
+                ev.format = 32
+                ev.l0 = 0 # _NET_WM_STATE_REMOVE
+                ev.l1 = net_wm_fs
+                ev.l2 = 0
+                ev.l3 = 1
+                x11.XSendEvent(dpy, ctypes.c_ulong(root), ctypes.c_int(0), ctypes.c_long(mask), ctypes.byref(ev))
+
+                ev.l0 = 1 # _NET_WM_STATE_ADD
+                ev.l1 = net_wm_max_v
+                ev.l2 = net_wm_max_h
+                x11.XSendEvent(dpy, ctypes.c_ulong(root), ctypes.c_int(0), ctypes.c_long(mask), ctypes.byref(ev))
+            x11.XFree(prop)
+        x11.XFlush(dpy)
+        x11.XCloseDisplay(dpy)
+except Exception:
+    pass
+' 2>/dev/null || true
+fi
+
+if [ "$(id -u)" -eq 0 ] && [ -n "${PRIMARY_USER}" ]; then
+  exec /usr/sbin/runuser -u "${PRIMARY_USER}" -- env \
+    DISPLAY="${DISPLAY}" \
+    XAUTHORITY="${XAUTHORITY}" \
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
+    DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS}" \
+    HOME="${HOME}" \
+    "$@"
+else
+  exec "$@"
+fi

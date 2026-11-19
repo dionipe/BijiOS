@@ -1,0 +1,15 @@
+# Build & packaging outputs
+/target/
+/dist/
+/packaging/.build/
+*.deb
+
+# Design reference mockups
+/ekspektasi/
+
+# Editor / OS temporary files
+.DS_Store
+*.swp
+*.swo
+*.tmp
+*~

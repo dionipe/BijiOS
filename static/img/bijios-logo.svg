@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Left Leaf: Hijau Tunas (#2F7D4F) -->
+  <path d="M62 56 C56 32, 34 18, 16 20 C16 42, 32 58, 62 56 Z" fill="#2F7D4F"/>
+  <!-- Right Leaf: Hijau Muda (#7FBF6A) -->
+  <path d="M66 56 C72 34, 92 22, 112 24 C110 44, 94 58, 66 56 Z" fill="#7FBF6A"/>
+  <!-- Golden Seed: Emas Benih (#E8A33D) -->
+  <ellipse cx="64" cy="86" rx="22" ry="27" fill="#E8A33D"/>
+</svg>

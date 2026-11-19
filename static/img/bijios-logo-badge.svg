@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Rounded Squircle Background: Hutan Malam (#12332A) -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#12332A"/>
+  <!-- Left Leaf: Hijau Tunas (#2F7D4F) -->
+  <path d="M62 58 C57 38, 39 27, 25 29 C25 46, 38 59, 62 58 Z" fill="#2F7D4F"/>
+  <!-- Right Leaf: Hijau Muda (#7FBF6A) -->
+  <path d="M66 58 C71 40, 88 30, 103 32 C101 48, 88 59, 66 58 Z" fill="#7FBF6A"/>
+  <!-- Golden Seed: Emas Benih (#E8A33D) -->
+  <ellipse cx="64" cy="84" rx="18" ry="22" fill="#E8A33D"/>
+</svg>

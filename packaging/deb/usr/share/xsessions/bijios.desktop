@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=BijiOS Desktop
+Comment=BijiOS Sovereign Desktop Environment (PAM Enabled)
+Exec=/usr/bin/bijios-session
+TryExec=/usr/bin/bijios-session
+Type=Application
+DesktopNames=BijiOS;Openbox

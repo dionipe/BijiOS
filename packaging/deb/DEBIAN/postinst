@@ -1,0 +1,134 @@
+#!/bin/bash
+set -e
+
+mkdir -p /var/lib/bijios-desktop/db /var/lib/bijios-desktop/storage
+chmod 755 /usr/bin/bijios-desktop /usr/bin/bijios-session /usr/bin/bijios-app-launch /usr/bin/bijios-app-sync
+chmod 775 /var/lib/bijios-desktop /var/lib/bijios-desktop/db /var/lib/bijios-desktop/storage
+
+if [ -x /usr/bin/bijios-app-sync ]; then
+  /usr/bin/bijios-app-sync || true
+fi
+
+# Auto-detect primary Linux user (UID >= 1000) for seamless 1x Tahoe PAM Login
+PRIMARY_USER="$(awk -F: '$3 >= 1000 && $3 < 60000 { print $1; exit }' /etc/passwd || true)"
+PRIMARY_HOME="$(awk -F: '$3 >= 1000 && $3 < 60000 { print $6; exit }' /etc/passwd || true)"
+
+mkdir -p /etc/lightdm/lightdm.conf.d
+rm -f /etc/lightdm/lightdm.conf.d/*dokuhub*.conf 2>/dev/null || true
+
+if [ -n "${PRIMARY_USER}" ]; then
+  groupadd -f autologin 2>/dev/null || true
+  usermod -aG autologin "${PRIMARY_USER}" 2>/dev/null || true
+
+  cat >/etc/lightdm/lightdm.conf.d/50-bijios.conf <<EOF
+[Seat:*]
+user-session=bijios
+autologin-session=bijios
+autologin-user=${PRIMARY_USER}
+autologin-user-timeout=0
+pam-autologin-service=lightdm-autologin
+greeter-session=lightdm-gtk-greeter
+allow-guest=false
+EOF
+
+  # Clear stale cached session (e.g., dokuhub / liquid-de) so LightDM autologin always finds 'bijios'
+  if [ -n "${PRIMARY_HOME}" ] && [ -d "${PRIMARY_HOME}" ]; then
+    cat >"${PRIMARY_HOME}/.dmrc" <<EOF
+[Desktop]
+Session=bijios
+EOF
+    chown "${PRIMARY_USER}:${PRIMARY_USER}" "${PRIMARY_HOME}/.dmrc" 2>/dev/null || true
+    chmod 644 "${PRIMARY_HOME}/.dmrc" 2>/dev/null || true
+
+    # Configure Openbox window rules for BijiOS Full Native Desktop & Login
+    mkdir -p "${PRIMARY_HOME}/.config/openbox"
+    if [ -f /etc/xdg/openbox/rc.xml ] && [ ! -f "${PRIMARY_HOME}/.config/openbox/rc.xml" ]; then
+      cp /etc/xdg/openbox/rc.xml "${PRIMARY_HOME}/.config/openbox/rc.xml"
+    fi
+    if [ -f "${PRIMARY_HOME}/.config/openbox/rc.xml" ] && ! grep -q "BijiOS Desktop" "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null; then
+      sed -i 's|</applications>|  <application title="BijiOS Desktop">\n    <decor>no</decor>\n    <maximized>true</maximized>\n    <fullscreen>no</fullscreen>\n    <layer>below</layer>\n    <skip_pager>yes</skip_pager>\n    <skip_taskbar>yes</skip_taskbar>\n  </application>\n  <application title="BijiOS Login">\n    <decor>no</decor>\n    <fullscreen>yes</fullscreen>\n    <layer>above</layer>\n    <skip_pager>yes</skip_pager>\n    <skip_taskbar>yes</skip_taskbar>\n  </application>\n</applications>|' "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null || true
+    fi
+    chown -R "${PRIMARY_USER}:${PRIMARY_USER}" "${PRIMARY_HOME}/.config/openbox" 2>/dev/null || true
+  fi
+
+  if [ -d /var/cache/lightdm/dmrc ]; then
+    cat >"/var/cache/lightdm/dmrc/${PRIMARY_USER}.dmrc" <<EOF
+[Desktop]
+Session=bijios
+EOF
+    chmod 644 "/var/cache/lightdm/dmrc/${PRIMARY_USER}.dmrc" 2>/dev/null || true
+  fi
+
+  if [ -d /var/lib/AccountsService/users ]; then
+    cat >"/var/lib/AccountsService/users/${PRIMARY_USER}" <<EOF
+[User]
+Session=bijios
+XSession=bijios
+SystemAccount=false
+EOF
+    chmod 600 "/var/lib/AccountsService/users/${PRIMARY_USER}" 2>/dev/null || true
+  fi
+fi
+
+# Migrate legacy DokuHub strings in local TOON database to BijiOS
+if [ -d /var/lib/bijios-desktop/db ]; then
+  find /var/lib/bijios-desktop/db -type f \( -name "*.toon" -o -name "*.dat" -o -name "*.md" -o -name "*.jsonl" \) \
+    -exec sed -i -e 's/DokuHub/BijiOS/g' -e 's/Dokuhub/BijiOS/g' -e 's/DokuMeet/BijiMeet/g' -e 's/admin@dokuhub\.io/admin@bijios.local/g' {} + 2>/dev/null || true
+fi
+
+# Clear stale Service Worker & HTTP cache in bijios-shell so updated JS/HTML loads immediately
+if [ -n "${PRIMARY_HOME}" ] && [ -d "${PRIMARY_HOME}/.config/bijios-shell/Default" ]; then
+  rm -rf "${PRIMARY_HOME}/.config/bijios-shell/Default/Service Worker" \
+         "${PRIMARY_HOME}/.config/bijios-shell/Default/Cache" \
+         "${PRIMARY_HOME}/.config/bijios-shell/Default/Code Cache" 2>/dev/null || true
+fi
+
+# Ensure Caps Lock is turned OFF on virtual/physical keyboard and active X11 display
+for led in /sys/class/leds/*capslock*/brightness; do
+  [ -w "$led" ] && echo 0 > "$led" 2>/dev/null || true
+done
+if command -v python3 >/dev/null 2>&1; then
+  DISPLAY=:0 XAUTHORITY="${PRIMARY_HOME}/.Xauthority" python3 -c '
+import ctypes
+try:
+    x11 = ctypes.CDLL("libX11.so.6")
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    dpy = x11.XOpenDisplay(b":0")
+    if dpy:
+        x11.XkbLockModifiers(ctypes.c_void_p(dpy), 0x0100, 2, 0)
+        x11.XFlush(ctypes.c_void_p(dpy))
+        x11.XCloseDisplay(ctypes.c_void_p(dpy))
+except Exception:
+    pass
+' 2>/dev/null || true
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl stop dokuhub.service 2>/dev/null || true
+  systemctl disable dokuhub.service 2>/dev/null || true
+  systemctl daemon-reload || true
+  systemctl set-default graphical.target || true
+  systemctl enable bijios-desktop.service || true
+  systemctl restart bijios-desktop.service || true
+  systemctl enable lightdm.service || true
+fi
+
+if [ -x /usr/bin/bijios-app-launch ]; then
+  /usr/bin/bijios-app-launch openbox --reconfigure >/dev/null 2>&1 || true
+  if command -v xcompmgr >/dev/null 2>&1 && ! pgrep -x xcompmgr >/dev/null 2>&1; then
+    setsid -f /usr/bin/bijios-app-launch xcompmgr -n </dev/null >/dev/null 2>&1 || true
+  fi
+fi
+pkill -f "bijios-desktop --shell" 2>/dev/null || true
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications || true
+fi
+
+echo ""
+echo "✅ BijiOS v1.0.0 (Padi) Full Native Desktop Environment installed successfully!"
+echo "   - 100% Pure Rust + Native GTK4 (macOS Golden Gate Liquid Glass, Zero Chromium)"
+echo "   - Linux PAM Authentication enabled (primary user: ${PRIMARY_USER:-Linux User})"
+echo "   - Run 'sudo systemctl restart lightdm' or 'sudo reboot' to launch BijiOS Desktop."
+echo ""
+exit 0

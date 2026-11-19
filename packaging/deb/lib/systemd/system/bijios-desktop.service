@@ -1,0 +1,22 @@
+[Unit]
+Description=BijiOS Sovereign Desktop Environment Daemon (PAM Auth)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Environment=PORT=3000
+Environment=HOST=0.0.0.0
+Environment=BIJIOS_STATIC_DIR=/usr/share/bijios-desktop/static
+Environment=BIJIOS_DATA_DIR=/var/lib/bijios-desktop/db
+Environment=DOKUHUB_DE_MODE=1
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/dionipe/.Xauthority
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+ExecStart=/usr/bin/bijios-desktop
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

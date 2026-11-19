@@ -1,0 +1,93 @@
+#!/bin/bash
+# BijiOS Full Native Desktop Environment Session Launcher (Pure Rust + GTK4 + Openbox, Zero Chromium)
+
+export BIJIOS_DE_MODE=1
+export DOKUHUB_DE_MODE=1
+export BIJIOS_STATIC_DIR="/usr/share/bijios-desktop/static"
+export BIJIOS_DATA_DIR="/var/lib/bijios-desktop/db"
+export PORT="${PORT:-3000}"
+export HOST="127.0.0.1"
+export GDK_BACKEND="x11"
+export GSK_RENDERER="cairo"
+
+mkdir -p "${HOME}/.config/openbox"
+
+# Export active X11 environment so bijios-desktop daemon & native apps share the session
+cat >/tmp/.bijios-x11-env <<EOF
+export DISPLAY="${DISPLAY:-:0}"
+export XAUTHORITY="${XAUTHORITY:-${HOME}/.Xauthority}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+export HOME="${HOME}"
+EOF
+chmod 644 /tmp/.bijios-x11-env 2>/dev/null || true
+
+if command -v xhost >/dev/null 2>&1; then
+  xhost +SI:localuser:root >/dev/null 2>&1 || true
+  xhost +SI:localuser:"$(id -un)" >/dev/null 2>&1 || true
+fi
+
+if command -v xset >/dev/null 2>&1; then
+  xset s off || true
+  xset -dpms || true
+  xset s noblank || true
+fi
+
+# Configure Openbox window rules for BijiOS Full Native Desktop & Login
+if [ -f /etc/xdg/openbox/rc.xml ] && [ ! -f "${HOME}/.config/openbox/rc.xml" ]; then
+  cp /etc/xdg/openbox/rc.xml "${HOME}/.config/openbox/rc.xml"
+fi
+if [ -f "${HOME}/.config/openbox/rc.xml" ] && ! grep -q "BijiOS Desktop" "${HOME}/.config/openbox/rc.xml" 2>/dev/null; then
+  sed -i 's|</applications>|  <application title="BijiOS Desktop">\n    <decor>no</decor>\n    <maximized>true</maximized>\n    <fullscreen>no</fullscreen>\n    <layer>below</layer>\n    <skip_pager>yes</skip_pager>\n    <skip_taskbar>yes</skip_taskbar>\n  </application>\n  <application title="BijiOS Login">\n    <decor>no</decor>\n    <fullscreen>yes</fullscreen>\n    <layer>above</layer>\n    <skip_pager>yes</skip_pager>\n    <skip_taskbar>yes</skip_taskbar>\n  </application>\n</applications>|' "${HOME}/.config/openbox/rc.xml" 2>/dev/null || true
+fi
+
+# Force X11 Caps Lock OFF on session start (prevents QEMU/VNC inverted Caps Lock on boot)
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c '
+import ctypes
+try:
+    x11 = ctypes.CDLL("libX11.so.6")
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    dpy = x11.XOpenDisplay(None)
+    if dpy:
+        x11.XkbLockModifiers(ctypes.c_void_p(dpy), 0x0100, 2, 0)
+        x11.XFlush(ctypes.c_void_p(dpy))
+        x11.XCloseDisplay(ctypes.c_void_p(dpy))
+except Exception:
+    pass
+' 2>/dev/null || true
+fi
+
+# 1. Start lightweight Window Manager (Openbox) & X11 ARGB Compositor (xcompmgr) for true rounded corners
+if command -v openbox >/dev/null 2>&1; then
+  openbox &
+  WM_PID=$!
+fi
+if command -v xcompmgr >/dev/null 2>&1; then
+  xcompmgr -n >/dev/null 2>&1 &
+fi
+
+# 2. Wait for BijiOS PAM & TOON v4 daemon on localhost:3000
+if ! curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+  for _ in $(seq 1 40); do
+    if curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.25
+  done
+fi
+
+# 3. Launch BijiOS Full Native Rust + GTK4 Desktop Shell (Zero Chromium!)
+while true; do
+  /usr/bin/bijios-desktop --shell || true
+
+  # Verify X server is still alive before respawning the native desktop shell
+  if command -v xset >/dev/null 2>&1; then
+    if ! xset q >/dev/null 2>&1; then
+      break
+    fi
+  fi
+  sleep 0.5
+done
+
+[ -n "${WM_PID:-}" ] && kill "${WM_PID}" 2>/dev/null || true

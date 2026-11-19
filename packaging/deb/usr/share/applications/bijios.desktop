@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=BijiOS Desktop
+Comment=BijiOS Sovereign Desktop Environment
+Exec=/usr/bin/bijios-session
+Icon=/usr/share/bijios-desktop/static/icons/icon.svg
+Terminal=false
+Type=Application
+Categories=System;
