@@ -62,8 +62,6 @@ rule = """
     <decor>no</decor>
     <maximized>no</maximized>
     <fullscreen>no</fullscreen>
-    <position force="yes"><x>0</x><y>0</y></position>
-    <size><width>100%</width><height>100%</height></size>
     <layer>below</layer>
     <skip_pager>yes</skip_pager>
     <skip_taskbar>yes</skip_taskbar>

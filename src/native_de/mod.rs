@@ -393,6 +393,10 @@ unsafe fn build_desktop_shell(
     });
     connect_signal(win, "map", move || {
         set_x11_desktop_window(win);
+        timeout_add_ms(120, move || {
+            set_x11_desktop_window(win);
+            false
+        });
     });
 
     let overlay = gtk_overlay_new();
