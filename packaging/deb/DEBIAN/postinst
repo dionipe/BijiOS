@@ -40,13 +40,20 @@ EOF
     chown "${PRIMARY_USER}:${PRIMARY_USER}" "${PRIMARY_HOME}/.dmrc" 2>/dev/null || true
     chmod 644 "${PRIMARY_HOME}/.dmrc" 2>/dev/null || true
 
-    # Configure Openbox window rules for BijiOS Full Native Desktop & Login
+    # Configure Openbox BijiOS-Liquid theme (CIML traffic lights) & window rules
     mkdir -p "${PRIMARY_HOME}/.config/openbox"
     if [ -f /etc/xdg/openbox/rc.xml ] && [ ! -f "${PRIMARY_HOME}/.config/openbox/rc.xml" ]; then
       cp /etc/xdg/openbox/rc.xml "${PRIMARY_HOME}/.config/openbox/rc.xml"
     fi
-    if [ -f "${PRIMARY_HOME}/.config/openbox/rc.xml" ] && ! grep -q "BijiOS Desktop" "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null; then
-      sed -i 's|</applications>|  <application title="BijiOS Desktop">\n    <decor>no</decor>\n    <maximized>true</maximized>\n    <fullscreen>no</fullscreen>\n    <layer>below</layer>\n    <skip_pager>yes</skip_pager>\n    <skip_taskbar>yes</skip_taskbar>\n  </application>\n  <application title="BijiOS Login">\n    <decor>no</decor>\n    <fullscreen>yes</fullscreen>\n    <layer>above</layer>\n    <skip_pager>yes</skip_pager>\n    <skip_taskbar>yes</skip_taskbar>\n  </application>\n</applications>|' "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null || true
+    if [ -f "${PRIMARY_HOME}/.config/openbox/rc.xml" ]; then
+      sed -i 's|<name>Clearlooks</name>|<name>BijiOS-Liquid</name>|g' "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null || true
+      sed -i 's|<titleLayout>[^<]*</titleLayout>|<titleLayout>CIML</titleLayout>|g' "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null || true
+      if ! grep -q "BijiOS Desktop" "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null; then
+        sed -i 's|</applications>|  <application title="BijiOS Desktop">\n    <decor>no</decor>\n    <maximized>true</maximized>\n    <fullscreen>no</fullscreen>\n    <layer>below</layer>\n    <skip_pager>yes</skip_pager>\n    <skip_taskbar>yes</skip_taskbar>\n  </application>\n  <application title="BijiOS Login">\n    <decor>no</decor>\n    <fullscreen>yes</fullscreen>\n    <layer>above</layer>\n    <skip_pager>yes</skip_pager>\n    <skip_taskbar>yes</skip_taskbar>\n  </application>\n</applications>|' "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null || true
+      fi
+      if ! grep -q "BijiOS-Storytold-Decor" "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null; then
+        sed -i 's|</applications>|  <!-- BijiOS-Storytold-Decor: Force unified BijiOS Close/Min/Max toolbar on Storytold apps -->\n  <application name="*wordcraft*"><decor>yes</decor></application>\n  <application class="*WordCraft*"><decor>yes</decor></application>\n  <application title="*WordCraft*"><decor>yes</decor></application>\n  <application name="*gridcraft*"><decor>yes</decor></application>\n  <application class="*GridCraft*"><decor>yes</decor></application>\n  <application title="*GridCraft*"><decor>yes</decor></application>\n  <application name="*deckcraft*"><decor>yes</decor></application>\n  <application class="*DeckCraft*"><decor>yes</decor></application>\n  <application title="*DeckCraft*"><decor>yes</decor></application>\n  <application name="*pdfcraft*"><decor>yes</decor></application>\n  <application class="*PDFCraft*"><decor>yes</decor></application>\n  <application class="*PdfCraft*"><decor>yes</decor></application>\n  <application title="*PDFCraft*"><decor>yes</decor></application>\n  <application title="*PdfCraft*"><decor>yes</decor></application>\n</applications>|' "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null || true
+      fi
     fi
     chown -R "${PRIMARY_USER}:${PRIMARY_USER}" "${PRIMARY_HOME}/.config/openbox" 2>/dev/null || true
   fi

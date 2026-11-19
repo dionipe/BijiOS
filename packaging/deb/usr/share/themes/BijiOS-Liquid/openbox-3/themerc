@@ -1,0 +1,71 @@
+# BijiOS 1.0.0 "Padi" — Liquid Glass Openbox-3 Theme
+# Matches BijiOS Native GTK4 macOS Titlebar (Hutan Malam + Traffic Lights CIML)
+
+border.width: 1
+border.color: #0B1F19
+padding.width: 8
+padding.height: 5
+window.handle.width: 0
+window.client.padding.width: 0
+window.client.padding.height: 0
+window.label.text.justify: left
+
+# Active Window Titlebar (Hutan Malam gradient)
+window.active.title.bg: flat vertical gradient
+window.active.title.bg.color: #163A30
+window.active.title.bg.colorTo: #102B23
+window.active.label.bg: parentrelative
+window.active.label.text.color: #F4EBD9
+window.active.border.color: #0B1F19
+
+# Inactive Window Titlebar
+window.inactive.title.bg: flat vertical gradient
+window.inactive.title.bg.color: #122E26
+window.inactive.title.bg.colorTo: #0C211B
+window.inactive.label.bg: parentrelative
+window.inactive.label.text.color: #9FB5AC
+window.inactive.border.color: #0B1F19
+
+# Active Traffic Light Buttons (Red Close, Yellow Minimize, Green Maximize)
+window.active.button.unpressed.bg: parentrelative
+window.active.button.hover.bg: parentrelative
+window.active.button.pressed.bg: parentrelative
+window.active.button.toggled.unpressed.bg: parentrelative
+window.active.button.toggled.hover.bg: parentrelative
+window.active.button.toggled.pressed.bg: parentrelative
+window.active.button.disabled.bg: parentrelative
+
+window.active.button.close.unpressed.image.color: #FF5F56
+window.active.button.close.hover.image.color: #FF8A80
+window.active.button.close.pressed.image.color: #D9382E
+
+window.active.button.iconify.unpressed.image.color: #FFBD2E
+window.active.button.iconify.hover.image.color: #FFE082
+window.active.button.iconify.pressed.image.color: #D49415
+
+window.active.button.max.unpressed.image.color: #27C93F
+window.active.button.max.hover.image.color: #69F0AE
+window.active.button.max.pressed.image.color: #179A2C
+window.active.button.max.toggled.unpressed.image.color: #27C93F
+window.active.button.max.toggled.hover.image.color: #69F0AE
+
+# Inactive Traffic Light Buttons (subtle muted circles)
+window.inactive.button.unpressed.bg: parentrelative
+window.inactive.button.hover.bg: parentrelative
+window.inactive.button.pressed.bg: parentrelative
+window.inactive.button.unpressed.image.color: #4A685E
+window.inactive.button.hover.image.color: #7FBF6A
+
+# Menu Styling
+menu.border.width: 1
+menu.border.color: #2F7D4F
+menu.title.bg: flat solid
+menu.title.bg.color: #12332A
+menu.title.text.color: #F4EBD9
+menu.items.bg: flat solid
+menu.items.bg.color: #102B23
+menu.items.text.color: #F4EBD9
+menu.items.active.bg: flat solid
+menu.items.active.bg.color: #2F7D4F
+menu.items.active.text.color: #FFFFFF
+menu.separator.color: #1F4A3D
