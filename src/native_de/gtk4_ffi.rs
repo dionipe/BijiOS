@@ -153,6 +153,7 @@ extern "C" {
     pub fn gtk_widget_set_margin_end(widget: *mut GtkWidget, margin: c_int);
     pub fn gtk_widget_set_tooltip_text(widget: *mut GtkWidget, text: *const c_char);
     pub fn gtk_widget_grab_focus(widget: *mut GtkWidget) -> c_int;
+    pub fn gtk_widget_has_focus(widget: *mut GtkWidget) -> c_int;
     pub fn gtk_widget_set_sensitive(widget: *mut GtkWidget, sensitive: c_int);
     pub fn gtk_widget_set_opacity(widget: *mut GtkWidget, opacity: c_double);
     pub fn gtk_widget_get_parent(widget: *mut GtkWidget) -> *mut GtkWidget;
@@ -276,7 +277,17 @@ extern "C" {
     // GtkStack
     pub fn gtk_stack_new() -> *mut GtkWidget;
     pub fn gtk_stack_add_named(stack: *mut GtkWidget, child: *mut GtkWidget, name: *const c_char) -> GPointer;
+    pub fn gtk_stack_remove(stack: *mut GtkWidget, child: *mut GtkWidget);
     pub fn gtk_stack_set_visible_child_name(stack: *mut GtkWidget, name: *const c_char);
+
+    // GtkPaned (Split Vertical / Split Horizontal panes in Pancer)
+    pub fn gtk_paned_new(orientation: c_int) -> *mut GtkWidget;
+    pub fn gtk_paned_set_start_child(paned: *mut GtkWidget, child: *mut GtkWidget);
+    pub fn gtk_paned_set_end_child(paned: *mut GtkWidget, child: *mut GtkWidget);
+    pub fn gtk_paned_set_resize_start_child(paned: *mut GtkWidget, resize: c_int);
+    pub fn gtk_paned_set_resize_end_child(paned: *mut GtkWidget, resize: c_int);
+    pub fn gtk_paned_set_shrink_start_child(paned: *mut GtkWidget, shrink: c_int);
+    pub fn gtk_paned_set_shrink_end_child(paned: *mut GtkWidget, shrink: c_int);
 
     // GtkOverlay (in-window floating overlays with true transparency, zero black X11 popup)
     pub fn gtk_overlay_new() -> *mut GtkWidget;
@@ -322,6 +333,7 @@ extern "C" {
     pub fn vte_terminal_copy_clipboard_format(terminal: *mut GtkWidget, format: c_int);
     pub fn vte_terminal_paste_clipboard(terminal: *mut GtkWidget);
     pub fn vte_terminal_reset(terminal: *mut GtkWidget, clear_tabstops: c_int, clear_history: c_int);
+    pub fn vte_terminal_get_window_title(terminal: *mut GtkWidget) -> *const c_char;
     pub fn pango_font_description_from_string(str_desc: *const c_char) -> GPointer;
     pub fn pango_font_description_free(desc: GPointer);
 }

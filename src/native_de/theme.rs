@@ -817,12 +817,137 @@ button.calc-op:hover {
     background-image: linear-gradient(145deg, #F3B95F 0%, #E8A33D 100%);
 }
 
-/* Pancer - BijiOS Native Terminal */
-.pancer-toolbar {
-    background-color: #0E261F;
+/* Pancer - BijiOS Native Terminal (Menu Bar, Dynamic Host Tab Bar & Split Panes) */
+.pancer-menubar {
+    background-color: #0D241E;
+    border-bottom: 1px solid rgba(127, 191, 106, 0.18);
+    padding: 2px 8px;
+    min-height: 26px;
+}
+
+button.pancer-menu-btn {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: #F4EBD9;
+    border-radius: 6px;
+    padding: 2px 10px;
+    min-height: 22px;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+button.pancer-menu-btn:hover {
+    background-color: rgba(127, 191, 106, 0.22);
+    color: #FFFFFF;
+}
+
+.pancer-dropdown {
+    background-image: linear-gradient(180deg, #133128 0%, #0C211B 100%);
+    border: 1px solid rgba(127, 191, 106, 0.36);
+    border-radius: 10px;
+    padding: 5px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.48);
+}
+
+button.pancer-menu-item {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: #F4EBD9;
+    border-radius: 7px;
+    padding: 5px 10px;
+    min-height: 24px;
+    font-size: 12px;
+    font-weight: 500;
+    box-shadow: none;
+}
+
+button.pancer-menu-item:hover {
+    background-color: #2F7D4F;
+    color: #FFFFFF;
+}
+
+.pancer-tabbar {
+    background-color: #091814;
     border-bottom: 1px solid rgba(127, 191, 106, 0.22);
-    padding: 4px 10px;
-    min-height: 30px;
+    padding: 3px 8px 0px 8px;
+    min-height: 28px;
+}
+
+.pancer-tab {
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    padding: 2px 6px 2px 10px;
+}
+
+.pancer-tab-active {
+    background-image: linear-gradient(180deg, #173D31 0%, #0E2720 100%);
+    border: 1px solid rgba(127, 191, 106, 0.42);
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    padding: 2px 6px 2px 10px;
+}
+
+button.pancer-tab-btn {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: #F4EBD9;
+    padding: 1px 4px;
+    min-height: 22px;
+    font-size: 11.5px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+button.pancer-tab-close {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: rgba(244, 235, 217, 0.55);
+    border-radius: 999px;
+    padding: 0 5px;
+    min-height: 18px;
+    min-width: 18px;
+    font-size: 11px;
+    box-shadow: none;
+}
+
+button.pancer-tab-close:hover {
+    background-color: rgba(239, 68, 68, 0.35);
+    color: #FFFFFF;
+}
+
+button.pancer-add-tab {
+    background-image: none;
+    background-color: rgba(127, 191, 106, 0.16);
+    border: 1px solid rgba(127, 191, 106, 0.32);
+    color: #E8A33D;
+    border-radius: 999px;
+    min-width: 24px;
+    min-height: 22px;
+    padding: 0 8px;
+    margin-bottom: 3px;
+    font-size: 14px;
+    font-weight: 800;
+    box-shadow: none;
+}
+
+button.pancer-add-tab:hover {
+    background-color: #2F7D4F;
+    color: #FFFFFF;
+}
+
+paned > separator {
+    background-color: rgba(127, 191, 106, 0.35);
+    min-width: 2px;
+    min-height: 2px;
 }
 
 .pancer-cwd-pill {

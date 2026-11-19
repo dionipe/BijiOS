@@ -3,6 +3,7 @@
 
 pub mod apps;
 pub mod gtk4_ffi;
+pub mod pancer;
 pub mod settings;
 pub mod theme;
 
