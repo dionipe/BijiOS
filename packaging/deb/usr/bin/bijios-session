@@ -41,10 +41,34 @@ if [ -f "${HOME}/.config/openbox/rc.xml" ]; then
   sed -i 's|<name>Clearlooks</name>|<name>BijiOS-Liquid</name>|g' "${HOME}/.config/openbox/rc.xml" 2>/dev/null || true
   sed -i 's|<titleLayout>[^<]*</titleLayout>|<titleLayout>CIML</titleLayout>|g' "${HOME}/.config/openbox/rc.xml" 2>/dev/null || true
   sed -i '/<margins>/,/<\/margins>/ { s|<top>[0-9]*</top>|<top>30</top>|; s|<bottom>[0-9]*</bottom>|<bottom>62</bottom>|; }' "${HOME}/.config/openbox/rc.xml" 2>/dev/null || true
-  sed -i '/<application title="BijiOS Desktop">/,/<\/application>/ { s|<maximized>true</maximized>|<maximized>no</maximized>|; s|<fullscreen>no</fullscreen>|<fullscreen>yes</fullscreen>|; }' "${HOME}/.config/openbox/rc.xml" 2>/dev/null || true
-  if ! grep -q "BijiOS Desktop" "${HOME}/.config/openbox/rc.xml" 2>/dev/null; then
-    sed -i 's|</applications>|  <application title="BijiOS Desktop">\n    <decor>no</decor>\n    <maximized>no</maximized>\n    <fullscreen>yes</fullscreen>\n    <layer>below</layer>\n    <skip_pager>yes</skip_pager>\n    <skip_taskbar>yes</skip_taskbar>\n  </application>\n  <application title="BijiOS Login">\n    <decor>no</decor>\n    <fullscreen>yes</fullscreen>\n    <layer>above</layer>\n    <skip_pager>yes</skip_pager>\n    <skip_taskbar>yes</skip_taskbar>\n  </application>\n</applications>|' "${HOME}/.config/openbox/rc.xml" 2>/dev/null || true
-  fi
+  python3 -c '
+import re
+p = "'"${HOME}"'/.config/openbox/rc.xml"
+s = open(p).read()
+s = re.sub(r"\s*<application title=\"BijiOS Desktop\">.*?</application>", "", s, flags=re.S)
+s = re.sub(r"\s*<application title=\"BijiOS Login\">.*?</application>", "", s, flags=re.S)
+rule = """
+  <application title="BijiOS Desktop">
+    <decor>no</decor>
+    <maximized>no</maximized>
+    <fullscreen>no</fullscreen>
+    <position force="yes"><x>0</x><y>0</y></position>
+    <size><width>100%</width><height>100%</height></size>
+    <layer>below</layer>
+    <skip_pager>yes</skip_pager>
+    <skip_taskbar>yes</skip_taskbar>
+  </application>
+  <application title="BijiOS Login">
+    <decor>no</decor>
+    <fullscreen>yes</fullscreen>
+    <layer>above</layer>
+    <skip_pager>yes</skip_pager>
+    <skip_taskbar>yes</skip_taskbar>
+  </application>
+</applications>"""
+s = s.replace("</applications>", rule, 1)
+open(p, "w").write(s)
+' 2>/dev/null || true
   if ! grep -q "BijiOS-Storytold-Decor" "${HOME}/.config/openbox/rc.xml" 2>/dev/null; then
     sed -i 's|</applications>|  <!-- BijiOS-Storytold-Decor: Force unified BijiOS Close/Min/Max toolbar on Storytold apps -->\n  <application name="*wordcraft*"><decor>yes</decor></application>\n  <application class="*WordCraft*"><decor>yes</decor></application>\n  <application title="*WordCraft*"><decor>yes</decor></application>\n  <application name="*gridcraft*"><decor>yes</decor></application>\n  <application class="*GridCraft*"><decor>yes</decor></application>\n  <application title="*GridCraft*"><decor>yes</decor></application>\n  <application name="*deckcraft*"><decor>yes</decor></application>\n  <application class="*DeckCraft*"><decor>yes</decor></application>\n  <application title="*DeckCraft*"><decor>yes</decor></application>\n  <application name="*pdfcraft*"><decor>yes</decor></application>\n  <application class="*PDFCraft*"><decor>yes</decor></application>\n  <application class="*PdfCraft*"><decor>yes</decor></application>\n  <application title="*PDFCraft*"><decor>yes</decor></application>\n  <application title="*PdfCraft*"><decor>yes</decor></application>\n</applications>|' "${HOME}/.config/openbox/rc.xml" 2>/dev/null || true
   fi
