@@ -336,6 +336,34 @@ extern "C" {
     pub fn vte_terminal_get_window_title(terminal: *mut GtkWidget) -> *const c_char;
     pub fn pango_font_description_from_string(str_desc: *const c_char) -> GPointer;
     pub fn pango_font_description_free(desc: GPointer);
+
+    // GTK4 X11 Native Surface + Xlib EWMH (_NET_WM_WINDOW_TYPE_DESKTOP)
+    pub fn gtk_native_get_surface(native: *mut GtkWidget) -> GPointer;
+    pub fn gdk_x11_display_get_xdisplay(display: *mut GdkDisplay) -> GPointer;
+    pub fn gdk_x11_surface_get_xid(surface: GPointer) -> c_ulong;
+    pub fn XDefaultScreen(display: GPointer) -> c_int;
+    pub fn XDisplayWidth(display: GPointer, screen: c_int) -> c_int;
+    pub fn XDisplayHeight(display: GPointer, screen: c_int) -> c_int;
+    pub fn XInternAtom(display: GPointer, atom_name: *const c_char, only_if_exists: c_int) -> c_ulong;
+    pub fn XChangeProperty(
+        display: GPointer,
+        window: c_ulong,
+        property: c_ulong,
+        prop_type: c_ulong,
+        format: c_int,
+        mode: c_int,
+        data: *const u8,
+        nelements: c_int,
+    ) -> c_int;
+    pub fn XMoveResizeWindow(
+        display: GPointer,
+        window: c_ulong,
+        x: c_int,
+        y: c_int,
+        width: c_uint,
+        height: c_uint,
+    ) -> c_int;
+    pub fn XFlush(display: GPointer) -> c_int;
 }
 
 // ============================================================================
@@ -648,4 +676,53 @@ pub unsafe fn scroll_window_to_bottom(sw: *mut GtkWidget) {
         let upper = gtk_adjustment_get_upper(adj);
         gtk_adjustment_set_value(adj, upper);
     }
+}
+
+/// Mark a GTK4 GtkWindow as an official X11 EWMH Desktop window (_NET_WM_WINDOW_TYPE_DESKTOP)
+/// covering 100% of the screen (0,0 -> WxH) permanently below all apps, ignoring Openbox <margins>
+/// and never interfering with Alt+Tab or raising above application windows when clicked.
+pub unsafe fn set_x11_desktop_window(win: *mut GtkWidget) {
+    let display = gdk_display_get_default();
+    if display.is_null() {
+        return;
+    }
+    let surface = gtk_native_get_surface(win);
+    if surface.is_null() {
+        return;
+    }
+    let xdisplay = gdk_x11_display_get_xdisplay(display);
+    let xid = gdk_x11_surface_get_xid(surface);
+    if xdisplay.is_null() || xid == 0 {
+        return;
+    }
+
+    let screen = XDefaultScreen(xdisplay);
+    let w = XDisplayWidth(xdisplay, screen);
+    let h = XDisplayHeight(xdisplay, screen);
+
+    let prop_name = cstr("_NET_WM_WINDOW_TYPE");
+    let desk_name = cstr("_NET_WM_WINDOW_TYPE_DESKTOP");
+    let xa_atom: c_ulong = 4; // XA_ATOM
+    let prop_mode_replace: c_int = 0;
+
+    let prop_atom = XInternAtom(xdisplay, prop_name.as_ptr(), 0);
+    let desk_atom = XInternAtom(xdisplay, desk_name.as_ptr(), 0);
+
+    XChangeProperty(
+        xdisplay,
+        xid,
+        prop_atom,
+        xa_atom,
+        32,
+        prop_mode_replace,
+        (&desk_atom as *const c_ulong) as *const u8,
+        1,
+    );
+
+    if w > 0 && h > 0 {
+        gtk_window_set_default_size(win, w, h);
+        gtk_widget_set_size_request(win, w, h);
+        XMoveResizeWindow(xdisplay, xid, 0, 0, w as c_uint, h as c_uint);
+    }
+    XFlush(xdisplay);
 }

@@ -384,9 +384,16 @@ unsafe fn build_desktop_shell(
     let title = cstr("BijiOS Desktop");
     gtk_window_set_title(win, title.as_ptr());
     gtk_window_set_decorated(win, 0);
-    // Sized to 100%x100% by Openbox <size> rule (never fullscreen so clicking desktop never hides apps or breaks Alt+Tab!)
-    gtk_window_set_default_size(win, 1280, 800);
     add_css(win, "bijios-desktop-bg");
+
+    // Set official X11 _NET_WM_WINDOW_TYPE_DESKTOP + full screen (0,0 -> WxH) on realize/map
+    // so Top Menu Bar & Floating Dock always show at screen edges while maximized apps respect <margins>
+    connect_signal(win, "realize", move || {
+        set_x11_desktop_window(win);
+    });
+    connect_signal(win, "map", move || {
+        set_x11_desktop_window(win);
+    });
 
     let overlay = gtk_overlay_new();
     let root = new_box(GTK_ORIENTATION_VERTICAL, 0, &[]);
