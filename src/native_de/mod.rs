@@ -384,7 +384,6 @@ unsafe fn build_desktop_shell(
     let title = cstr("BijiOS Desktop");
     gtk_window_set_title(win, title.as_ptr());
     gtk_window_set_decorated(win, 0);
-    gtk_window_maximize(win);
     add_css(win, "bijios-desktop-bg");
 
     let overlay = gtk_overlay_new();
