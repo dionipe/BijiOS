@@ -337,6 +337,30 @@ extern "C" {
     pub fn pango_font_description_from_string(str_desc: *const c_char) -> GPointer;
     pub fn pango_font_description_free(desc: GPointer);
 
+    // GtkDrawingArea & Cairo (Real-time Activity Monitor charts)
+    pub fn gtk_drawing_area_new() -> *mut GtkWidget;
+    pub fn gtk_drawing_area_set_content_width(area: *mut GtkWidget, width: c_int);
+    pub fn gtk_drawing_area_set_content_height(area: *mut GtkWidget, height: c_int);
+    pub fn gtk_drawing_area_set_draw_func(
+        area: *mut GtkWidget,
+        draw_func: extern "C" fn(*mut GtkWidget, GPointer, c_int, c_int, GPointer),
+        user_data: GPointer,
+        destroy: extern "C" fn(GPointer),
+    );
+    pub fn gtk_widget_queue_draw(widget: *mut GtkWidget);
+    pub fn cairo_set_source_rgba(cr: GPointer, r: c_double, g: c_double, b: c_double, a: c_double);
+    pub fn cairo_set_line_width(cr: GPointer, width: c_double);
+    pub fn cairo_set_line_join(cr: GPointer, line_join: c_int);
+    pub fn cairo_set_line_cap(cr: GPointer, line_cap: c_int);
+    pub fn cairo_move_to(cr: GPointer, x: c_double, y: c_double);
+    pub fn cairo_line_to(cr: GPointer, x: c_double, y: c_double);
+    pub fn cairo_close_path(cr: GPointer);
+    pub fn cairo_new_path(cr: GPointer);
+    pub fn cairo_stroke(cr: GPointer);
+    pub fn cairo_fill(cr: GPointer);
+    pub fn cairo_rectangle(cr: GPointer, x: c_double, y: c_double, width: c_double, height: c_double);
+    pub fn cairo_arc(cr: GPointer, xc: c_double, yc: c_double, radius: c_double, angle1: c_double, angle2: c_double);
+
     // GTK4 X11 Native Surface + Xlib EWMH (_NET_WM_WINDOW_TYPE_DESKTOP)
     pub fn gtk_native_get_surface(native: *mut GtkWidget) -> GPointer;
     pub fn gdk_x11_display_get_xdisplay(display: *mut GdkDisplay) -> GPointer;
@@ -685,6 +709,35 @@ pub unsafe fn timeout_add_ms<F: FnMut() -> bool + 'static>(ms: u32, f: F) {
     let boxed: Box<Box<dyn FnMut() -> bool>> = Box::new(Box::new(f));
     let raw = Box::into_raw(boxed) as GPointer;
     g_timeout_add(ms, trampoline_timer, raw);
+}
+
+extern "C" fn trampoline_draw(
+    _area: *mut GtkWidget,
+    cr: GPointer,
+    width: c_int,
+    height: c_int,
+    data: GPointer,
+) {
+    let cb: &mut Box<dyn FnMut(GPointer, i32, i32)> =
+        unsafe { &mut *(data as *mut Box<dyn FnMut(GPointer, i32, i32)>) };
+    cb(cr, width, height);
+}
+
+extern "C" fn destroy_draw(data: GPointer) {
+    if !data.is_null() {
+        unsafe {
+            let _ = Box::from_raw(data as *mut Box<dyn FnMut(GPointer, i32, i32)>);
+        }
+    }
+}
+
+pub unsafe fn set_drawing_area_draw_func<F: FnMut(GPointer, i32, i32) + 'static>(
+    area: *mut GtkWidget,
+    f: F,
+) {
+    let boxed: Box<Box<dyn FnMut(GPointer, i32, i32)>> = Box::new(Box::new(f));
+    let raw = Box::into_raw(boxed) as GPointer;
+    gtk_drawing_area_set_draw_func(area, trampoline_draw, raw, destroy_draw);
 }
 
 pub unsafe fn scroll_window_to_bottom(sw: *mut GtkWidget) {

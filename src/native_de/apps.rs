@@ -1271,109 +1271,7 @@ pub fn read_load_avg() -> String {
 }
 
 pub fn open_activity_monitor(app: *mut GtkApplication) {
-    unsafe {
-        let win = create_app_window(app, "📈 BijiOS Activity Monitor", 780, 540);
-        let root = new_box(GTK_ORIENTATION_VERTICAL, 12, &[]);
-        set_margin_all(root, 18);
-
-        let title = new_label("BijiOS Real-Time System & Process Monitor", &["app-heading"]);
-        gtk_label_set_xalign(title, 0.0);
-        gtk_box_append(root, title);
-
-        // Stats cards
-        let stats_row = new_box(GTK_ORIENTATION_HORIZONTAL, 12, &[]);
-        gtk_box_set_homogeneous(stats_row, 1);
-
-        let cpu_card = new_box(GTK_ORIENTATION_VERTICAL, 6, &["app-card"]);
-        gtk_box_append(cpu_card, new_label("⚡ CPU Load Average", &["app-section-title"]));
-        let cpu_lbl = new_label(&read_load_avg(), &["app-heading"]);
-        gtk_box_append(cpu_card, cpu_lbl);
-
-        let mem_card = new_box(GTK_ORIENTATION_VERTICAL, 6, &["app-card"]);
-        gtk_box_append(mem_card, new_label("🧠 Memory (RAM)", &["app-section-title"]));
-        let (used_mb, total_mb, pct) = read_mem_usage();
-        let mem_lbl = new_label(&format!("{} MB / {} MB ({:.0}%)", used_mb, total_mb, pct * 100.0), &["app-muted"]);
-        let mem_bar = gtk_progress_bar_new();
-        gtk_progress_bar_set_fraction(mem_bar, pct);
-        gtk_box_append(mem_card, mem_lbl);
-        gtk_box_append(mem_card, mem_bar);
-
-        gtk_box_append(stats_row, cpu_card);
-        gtk_box_append(stats_row, mem_card);
-        gtk_box_append(root, stats_row);
-
-        let proc_title = new_label("Running Linux & BijiOS Processes (/proc)", &["app-section-title"]);
-        gtk_label_set_xalign(proc_title, 0.0);
-        gtk_box_append(root, proc_title);
-
-        let scroller = gtk_scrolled_window_new();
-        gtk_widget_set_hexpand(scroller, 1);
-        gtk_widget_set_vexpand(scroller, 1);
-        let proc_tv = gtk_text_view_new();
-        gtk_text_view_set_editable(proc_tv, 0);
-        gtk_text_view_set_monospace(proc_tv, 1);
-        add_css(proc_tv, "editor-view");
-        gtk_scrolled_window_set_child(scroller, proc_tv);
-        gtk_box_append(root, scroller);
-
-        let update_procs = move || {
-            let (u, t, p) = read_mem_usage();
-            set_label_text(cpu_lbl, &read_load_avg());
-            set_label_text(mem_lbl, &format!("{} MB / {} MB ({:.0}%)", u, t, p * 100.0));
-            gtk_progress_bar_set_fraction(mem_bar, p);
-
-            let mut lines = vec![format!("{:<8} {:<26} {:<10}", "PID", "PROCESS", "RSS (MB)")];
-            lines.push("------------------------------------------------".to_string());
-            let mut procs: Vec<(u32, String, f64)> = Vec::new();
-            if let Ok(rd) = fs::read_dir("/proc") {
-                for ent in rd.flatten() {
-                    if let Ok(pid) = ent.file_name().to_string_lossy().parse::<u32>() {
-                        let comm = fs::read_to_string(ent.path().join("comm"))
-                            .unwrap_or_default()
-                            .trim()
-                            .to_string();
-                        let mut rss_kb = 0u64;
-                        if let Ok(st) = fs::read_to_string(ent.path().join("status")) {
-                            for l in st.lines() {
-                                if l.starts_with("VmRSS:") {
-                                    rss_kb = l.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-                                    break;
-                                }
-                            }
-                        }
-                        if !comm.is_empty() {
-                            procs.push((pid, comm, rss_kb as f64 / 1024.0));
-                        }
-                    }
-                }
-            }
-            procs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-            for (pid, comm, rss) in procs.into_iter().take(35) {
-                lines.push(format!("{:<8} {:<26} {:>7.1} MB", pid, comm, rss));
-            }
-            set_text_view_text(proc_tv, &lines.join("\n"));
-        };
-
-        let act_alive = Rc::new(std::cell::Cell::new(true));
-        {
-            let aa = Rc::clone(&act_alive);
-            connect_signal(win, "destroy", move || {
-                aa.set(false);
-            });
-        }
-
-        update_procs();
-        timeout_add_sec(2, move || {
-            if !act_alive.get() {
-                return false;
-            }
-            update_procs();
-            true
-        });
-
-        gtk_window_set_child(win, root);
-        gtk_window_present(win);
-    }
+    crate::native_de::activity::open_activity_monitor(app);
 }
 
 // ============================================================================
@@ -1577,7 +1475,7 @@ pub fn open_about(app: *mut GtkApplication) {
         let h_uk = new_label("Platform", &["kv-key"]);
         gtk_label_set_xalign(h_uk, 0.0);
         gtk_widget_set_size_request(h_uk, 92, -1);
-        let h_uv = new_label("Indonesia Virtual Environment —", &["kv-val"]);
+        let h_uv = new_label("Infrastructure Data Virtual Environment —", &["kv-val"]);
         gtk_label_set_xalign(h_uv, 0.0);
         let h_link = new_link_button("https://idve.cloud/ ↗", "https://idve.cloud/", &["link-btn"]);
         gtk_box_append(h_url_row, h_uk);

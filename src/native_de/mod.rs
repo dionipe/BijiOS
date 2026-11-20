@@ -1,6 +1,7 @@
 //! BijiOS 1.0.0 "Padi" — Full Native Desktop Environment (Pure Rust + GTK4, Zero Chromium)
 //! Official BijiOS Visual Identity + macOS Liquid Glass Edition (International English UI)
 
+pub mod activity;
 pub mod apps;
 pub mod gtk4_ffi;
 pub mod pancer;

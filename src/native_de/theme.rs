@@ -1192,4 +1192,230 @@ button.link-pill:hover {
     padding: 6px;
     box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
 }
+
+/* ==========================================================================
+   BijiOS Activity Monitor — Aesthetic Real-Time Telemetry & Process Manager
+   ========================================================================== */
+.act-topbar {
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(244, 235, 217, 0.65) 100%);
+    border-bottom: 1px solid rgba(18, 51, 42, 0.10);
+    padding: 10px 18px;
+}
+
+.act-uptime-pill {
+    background-color: rgba(47, 125, 79, 0.10);
+    border: 1px solid rgba(47, 125, 79, 0.22);
+    color: #12332A;
+    border-radius: 999px;
+    padding: 3px 11px;
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.act-kpi-card {
+    background-image: linear-gradient(180deg, #FFFFFF 0%, #FBFDFB 100%);
+    border: 1px solid rgba(18, 51, 42, 0.10);
+    border-radius: 14px;
+    padding: 12px 14px;
+    box-shadow: 0 4px 14px rgba(18, 51, 42, 0.05);
+}
+
+.act-kpi-val {
+    font-size: 24px;
+    font-weight: 800;
+    color: #12332A;
+    letter-spacing: -0.4px;
+}
+
+.act-kpi-sub {
+    font-size: 11.5px;
+    font-weight: 500;
+    color: #64748B;
+}
+
+.act-badge-ok {
+    background-color: rgba(47, 125, 79, 0.14);
+    color: #1B5E3A;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.act-badge-warn {
+    background-color: rgba(232, 163, 61, 0.22);
+    color: #9A5B06;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.act-badge-high {
+    background-color: rgba(225, 29, 72, 0.16);
+    color: #BE123C;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.act-chart-frame {
+    background-color: #0D221C;
+    border: 1px solid rgba(127, 191, 106, 0.24);
+    border-radius: 11px;
+    padding: 2px;
+}
+
+.act-legend-cpu {
+    color: #2F7D4F;
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.act-legend-mem {
+    color: #2563EB;
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.act-legend-read {
+    color: #D97706;
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.act-legend-write {
+    color: #E11D48;
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.act-legend-rx {
+    color: #059669;
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.act-legend-tx {
+    color: #4F46E5;
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.act-proc-header {
+    background-color: #EEF3F0;
+    border: 1px solid #D8E2DC;
+    border-radius: 10px;
+    padding: 7px 12px;
+}
+
+.act-proc-hdr-lbl {
+    font-size: 11px;
+    font-weight: 800;
+    color: #334155;
+    letter-spacing: 0.4px;
+}
+
+.act-proc-row {
+    background-color: #FFFFFF;
+    border: 1px solid rgba(18, 51, 42, 0.06);
+    border-radius: 9px;
+    padding: 6px 12px;
+}
+
+.act-proc-row-alt {
+    background-color: #F8FAF9;
+    border: 1px solid rgba(18, 51, 42, 0.06);
+    border-radius: 9px;
+    padding: 6px 12px;
+}
+
+.act-proc-name {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #12332A;
+}
+
+.act-proc-mono {
+    font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #334155;
+}
+
+.act-state-run {
+    background-color: rgba(47, 125, 79, 0.16);
+    color: #1B5E3A;
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.act-state-sleep {
+    background-color: rgba(100, 116, 139, 0.14);
+    color: #475569;
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.act-state-other {
+    background-color: rgba(232, 163, 61, 0.22);
+    color: #9A5B06;
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+button.act-end-btn {
+    background-image: none;
+    background-color: #FEF3C7;
+    border: 1px solid #F59E0B;
+    color: #92400E;
+    border-radius: 8px;
+    padding: 2px 8px;
+    min-height: 22px;
+    font-size: 11px;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+button.act-end-btn:hover {
+    background-color: #F59E0B;
+    color: #FFFFFF;
+}
+
+button.act-kill-btn {
+    background-image: none;
+    background-color: #FFE4E6;
+    border: 1px solid #FB7185;
+    color: #BE123C;
+    border-radius: 8px;
+    padding: 2px 8px;
+    min-height: 22px;
+    font-size: 11px;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+button.act-kill-btn:hover {
+    background-color: #E11D48;
+    color: #FFFFFF;
+}
+
+progressbar.act-bar-cpu > trough > progress {
+    background-image: linear-gradient(90deg, #2F7D4F, #7FBF6A);
+}
+
+progressbar.act-bar-mem > trough > progress {
+    background-image: linear-gradient(90deg, #2563EB, #60A5FA);
+}
+
+progressbar.act-bar-disk > trough > progress {
+    background-image: linear-gradient(90deg, #D97706, #E8A33D);
+}
 "#;
