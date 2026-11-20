@@ -864,7 +864,7 @@ unsafe fn build_general_page(
     let (arch, kernel) = crate::native_de::apps::read_arch_and_kernel();
     let a_meta = new_label(
         &format!(
-            "Base OS: {}  •  Arch: {}  •  Kernel: {}\nHost: {}  •  RAM: {} / {} MB  •  CPU: {}\nHypervisor: {}  •  https://idve.cloud/",
+            "Base OS: {}  •  Arch: {}  •  Kernel: {}\nHost: {}  •  RAM: {} / {} MB  •  CPU: {}\nHypervisor: {}  •  https://idve.cloud/\nRepository: https://github.com/dionipe/BijiOS  •  Contributor: @dionipe",
             crate::native_de::apps::read_os_pretty_name(),
             arch,
             kernel,

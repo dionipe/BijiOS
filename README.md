@@ -118,8 +118,19 @@ BijiOS Desktop bundles and integrates the following pure Rust office application
 
 ---
 
+## Contributors
+
+| Contributor | GitHub | Role |
+| :--- | :--- | :--- |
+| **Dionipe** | [@dionipe](https://github.com/dionipe) | Creator & Core Maintainer |
+
+- **Repository**: [https://github.com/dionipe/BijiOS](https://github.com/dionipe/BijiOS)
+- **Contributors Graph**: [https://github.com/dionipe/BijiOS/graphs/contributors](https://github.com/dionipe/BijiOS/graphs/contributors)
+
+---
+
 ## Infrastructure & Credits
 
-- **OS & Desktop**: BijiOS v1.0.0 ("Padi")
+- **OS & Desktop**: BijiOS v1.0.0 ("Padi") — [https://github.com/dionipe/BijiOS](https://github.com/dionipe/BijiOS)
 - **Bundled Office Suite**: Storytold / ArtCraft ([https://github.com/storytold](https://github.com/storytold)) — Apache License 2.0
 - **Cloud & Virtualization Host**: Powered by **IDVE Cloud / KVM** ([https://idve.cloud/](https://idve.cloud/))

@@ -1417,8 +1417,19 @@ pub fn read_virt_host_info() -> String {
         .unwrap_or_default()
         .trim()
         .to_string();
-    if !vendor.is_empty() || !product.is_empty() {
-        format!("IDVE Cloud / {} ({} {})", virt, vendor, product).trim().to_string()
+    let model = if !vendor.is_empty() && !product.is_empty() {
+        if product.to_lowercase().starts_with(&vendor.to_lowercase()) {
+            product
+        } else {
+            format!("{} {}", vendor, product)
+        }
+    } else if !product.is_empty() {
+        product
+    } else {
+        vendor
+    };
+    if !model.is_empty() {
+        format!("IDVE Cloud / {} ({})", virt, model)
     } else {
         format!("IDVE Cloud / {} Virtualization", virt)
     }
@@ -1558,7 +1569,8 @@ pub fn open_about(app: *mut GtkApplication) {
         gtk_label_set_xalign(c_hdr, 0.0);
         let c_txt = new_label(
             "WordCraft (v0.18.1), GridCraft (v0.19.1), DeckCraft (v0.18.1), PDFCraft (v0.21.1)\n\
-             By Storytold / ArtCraft (https://github.com/storytold) — Licensed under Apache License 2.0.",
+             By Storytold / ArtCraft (https://github.com/storytold) — Licensed under Apache License 2.0.\n\
+             GitHub: https://github.com/dionipe/BijiOS  •  Contributor: @dionipe (https://github.com/dionipe)",
             &["finder-meta-lbl"],
         );
         gtk_label_set_xalign(c_txt, 0.0);
