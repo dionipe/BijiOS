@@ -388,13 +388,19 @@ pub unsafe fn apply_desktop_settings(handles: &DesktopHandles) {
     let c_css = cstr(&css_str);
     gtk_css_provider_load_from_string(handles.dynamic_css, c_css.as_ptr());
 
-    // 3. Apply Floating Dock Orientation, Openbox Margins, Visibility & Position live
+    // 3. Apply Floating Dock Orientation, Magnification Headroom, Openbox Margins, Visibility & Position live
     match s.dock_position.as_str() {
-        "left" | "right" => {
+        "left" => {
             gtk_orientable_set_orientation(handles.dock_box, GTK_ORIENTATION_VERTICAL);
+            set_margins(handles.dock_box, 22, 22, 6, 28);
+        }
+        "right" => {
+            gtk_orientable_set_orientation(handles.dock_box, GTK_ORIENTATION_VERTICAL);
+            set_margins(handles.dock_box, 22, 22, 28, 6);
         }
         _ => {
             gtk_orientable_set_orientation(handles.dock_box, GTK_ORIENTATION_HORIZONTAL);
+            set_margins(handles.dock_box, 28, 6, 22, 22);
         }
     }
     dock::sync_openbox_margins(s.dock_hidden, &s.dock_position, sz);
@@ -479,6 +485,7 @@ unsafe fn build_desktop_shell(
     gtk_widget_set_vexpand(body_hbox, 1);
 
     // Dedicated Floating Above-All Dock Window (floats over maximized windows!)
+    // Transparent outer stage provides headroom so magnified icons NEVER clip at window edges.
     let dock_win = gtk_window_new();
     gtk_window_set_application(dock_win, app);
     let dock_title = cstr("BijiOS Dock");
@@ -486,8 +493,13 @@ unsafe fn build_desktop_shell(
     gtk_window_set_decorated(dock_win, 0);
     gtk_window_set_resizable(dock_win, 0);
     add_css(dock_win, "dock-floating-win");
+    let dock_stage = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+    gtk_widget_set_overflow(dock_stage, 0); // GTK_OVERFLOW_VISIBLE
     let dock = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &["bijios-dock"]);
-    gtk_window_set_child(dock_win, dock);
+    gtk_widget_set_overflow(dock, 0); // GTK_OVERFLOW_VISIBLE
+    set_margins(dock, 28, 6, 22, 22);
+    gtk_box_append(dock_stage, dock);
+    gtk_window_set_child(dock_win, dock_stage);
 
     // Top Menu Bar live user avatar slot
     let menubar_avatar_slot = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);

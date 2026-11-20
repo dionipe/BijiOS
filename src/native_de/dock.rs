@@ -211,11 +211,12 @@ pub fn sync_openbox_margins(auto_hide: bool, position: &str, dock_size: i32) {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn();
+            .status();
     }
 }
 
-/// Position the floating above-all Dock window at the configured screen edge (Bottom / Left / Right).
+/// Position the floating above-all Dock window flush at the configured screen edge (Bottom / Left / Right).
+/// Transparent headroom margins inside `dock_win` give magnified icons room to pop out without clipping.
 pub unsafe fn reposition_dock_window(dock_win: *mut GtkWidget, pos: &str) {
     if dock_win.is_null() {
         return;
@@ -227,9 +228,9 @@ pub unsafe fn reposition_dock_window(dock_win: *mut GtkWidget, pos: &str) {
     let dw = gtk_widget_get_width(dock_win).max(48);
     let dh = gtk_widget_get_height(dock_win).max(32);
     let (x, y) = match pos {
-        "left" => (6, ((sh - dh) / 2).max(34)),
-        "right" => ((sw - dw - 6).max(0), ((sh - dh) / 2).max(34)),
-        _ => (((sw - dw) / 2).max(0), (sh - dh - 6).max(34)),
+        "left" => (0, ((sh - dh) / 2).max(30)),
+        "right" => ((sw - dw).max(0), ((sh - dh) / 2).max(30)),
+        _ => (((sw - dw) / 2).max(0), (sh - dh).max(30)),
     };
     set_x11_dock_window(dock_win, x, y);
 }

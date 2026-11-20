@@ -47,8 +47,12 @@ EOF
     if [ -f "${PRIMARY_HOME}/.config/openbox/rc.xml" ]; then
       sed -i 's|<name>Clearlooks</name>|<name>BijiOS-Liquid</name>|g' "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null || true
       sed -i 's|<titleLayout>[^<]*</titleLayout>|<titleLayout>CIML</titleLayout>|g' "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null || true
-      # Reserve Top Menu Bar (30px) & Floating Dock (62px) so maximized apps never cover bar or dock
-      sed -i '/<margins>/,/<\/margins>/ { s|<top>[0-9]*</top>|<top>30</top>|; s|<bottom>[0-9]*</bottom>|<bottom>62</bottom>|; }' "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null || true
+      # Reserve Top Menu Bar (30px); Bottom margin is 0 when Dock Auto-Hide is enabled
+      DOCK_BOTTOM_MARGIN="62"
+      if grep -q "^dock_hidden=true" "${PRIMARY_HOME}/.config/bijios-desktop/settings.conf" 2>/dev/null; then
+        DOCK_BOTTOM_MARGIN="0"
+      fi
+      sed -i "/<margins>/,/<\/margins>/ { s|<top>[0-9]*</top>|<top>30</top>|; s|<bottom>[0-9]*</bottom>|<bottom>${DOCK_BOTTOM_MARGIN}</bottom>|; }" "${PRIMARY_HOME}/.config/openbox/rc.xml" 2>/dev/null || true
       # Replace BijiOS Desktop rule so it is 100%x100% at (0,0) in <layer>below</layer> WITHOUT fullscreen (preserves Alt+Tab & prevents desktop click from covering apps)
       python3 -c '
 import re
@@ -56,6 +60,7 @@ p = "'"${PRIMARY_HOME}"'/.config/openbox/rc.xml"
 s = open(p).read()
 s = re.sub(r"\s*<application title=\"BijiOS Desktop\">.*?</application>", "", s, flags=re.S)
 s = re.sub(r"\s*<application title=\"BijiOS Login\">.*?</application>", "", s, flags=re.S)
+s = re.sub(r"\s*<application title=\"BijiOS Dock\">.*?</application>", "", s, flags=re.S)
 rule = """
   <application title="BijiOS Desktop">
     <decor>no</decor>
@@ -64,6 +69,13 @@ rule = """
     <layer>below</layer>
     <skip_pager>yes</skip_pager>
     <skip_taskbar>yes</skip_taskbar>
+  </application>
+  <application title="BijiOS Dock">
+    <decor>no</decor>
+    <layer>above</layer>
+    <skip_pager>yes</skip_pager>
+    <skip_taskbar>yes</skip_taskbar>
+    <focus>no</focus>
   </application>
   <application title="BijiOS Login">
     <decor>no</decor>
