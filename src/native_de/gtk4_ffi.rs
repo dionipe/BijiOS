@@ -388,6 +388,7 @@ extern "C" {
         width: c_uint,
         height: c_uint,
     ) -> c_int;
+    pub fn XRaiseWindow(display: GPointer, window: c_ulong) -> c_int;
     pub fn XFlush(display: GPointer) -> c_int;
 }
 
@@ -851,5 +852,58 @@ pub unsafe fn set_x11_desktop_window(win: *mut GtkWidget) {
         gtk_widget_set_size_request(win, w, h);
         XMoveResizeWindow(xdisplay, xid, 0, 0, w as c_uint, h as c_uint);
     }
+    XFlush(xdisplay);
+}
+
+/// Enforce full-screen, always-on-top X11 Lock/Login window covering 100% of the screen (0,0 -> WxH)
+/// above all desktop bars, docks, and application windows so zero desktop activity is possible while locked.
+pub unsafe fn set_x11_lock_window(win: *mut GtkWidget) {
+    gtk_window_fullscreen(win);
+    let display = gdk_display_get_default();
+    if display.is_null() {
+        return;
+    }
+    let surface = gtk_native_get_surface(win);
+    if surface.is_null() {
+        return;
+    }
+    let xdisplay = gdk_x11_display_get_xdisplay(display);
+    let xid = gdk_x11_surface_get_xid(surface);
+    if xdisplay.is_null() || xid == 0 {
+        return;
+    }
+
+    let screen = XDefaultScreen(xdisplay);
+    let w = XDisplayWidth(xdisplay, screen);
+    let h = XDisplayHeight(xdisplay, screen);
+
+    let xa_atom: c_ulong = 4; // XA_ATOM
+    let prop_mode_replace: c_int = 0;
+
+    let state_prop = XInternAtom(xdisplay, cstr("_NET_WM_STATE").as_ptr(), 0);
+    let states: [c_ulong; 4] = [
+        XInternAtom(xdisplay, cstr("_NET_WM_STATE_FULLSCREEN").as_ptr(), 0),
+        XInternAtom(xdisplay, cstr("_NET_WM_STATE_ABOVE").as_ptr(), 0),
+        XInternAtom(xdisplay, cstr("_NET_WM_STATE_SKIP_TASKBAR").as_ptr(), 0),
+        XInternAtom(xdisplay, cstr("_NET_WM_STATE_SKIP_PAGER").as_ptr(), 0),
+    ];
+
+    XChangeProperty(
+        xdisplay,
+        xid,
+        state_prop,
+        xa_atom,
+        32,
+        prop_mode_replace,
+        states.as_ptr() as *const u8,
+        states.len() as c_int,
+    );
+
+    if w > 0 && h > 0 {
+        gtk_window_set_default_size(win, w, h);
+        gtk_widget_set_size_request(win, w, h);
+        XMoveResizeWindow(xdisplay, xid, 0, 0, w as c_uint, h as c_uint);
+    }
+    XRaiseWindow(xdisplay, xid);
     XFlush(xdisplay);
 }

@@ -85,7 +85,19 @@ fn authenticate_via_daemon(username: &str, password: &str) -> bool {
     false
 }
 
-fn trigger_power(action: &str) {
+pub fn trigger_power(action: &str) {
+    if action == "logout" {
+        let _ = Command::new("sh")
+            .args([
+                "-c",
+                "openbox --exit || loginctl terminate-session \"$XDG_SESSION_ID\" || pkill -TERM -u \"$USER\" openbox",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        return;
+    }
     let cmd = match action {
         "sleep" => "suspend",
         "restart" => "reboot",
@@ -482,8 +494,19 @@ unsafe fn build_desktop_shell(
         Rc::new(move || {
             let lw = *login_holder.borrow();
             if !lw.is_null() {
+                // Hide desktop shell so Top Menu Bar, widgets, and Dock cannot be accessed while locked
+                gtk_widget_set_visible(win, 0);
                 gtk_widget_set_visible(lw, 1);
+                gtk_window_fullscreen(lw);
+                set_x11_lock_window(lw);
                 gtk_window_present(lw);
+                timeout_add_ms(80, move || {
+                    if gtk_widget_get_visible(lw) != 0 {
+                        set_x11_lock_window(lw);
+                        gtk_window_present(lw);
+                    }
+                    false
+                });
             }
         })
     };
@@ -517,6 +540,7 @@ unsafe fn build_desktop_shell(
     let m_activity = new_left_button("📈", "Activity Monitor...", &["sidebar-btn"]);
     let m_settings = new_left_button("⚙️", "System Settings...", &["sidebar-btn"]);
     let m_lock = new_left_button("🔒", "Lock Screen", &["sidebar-btn"]);
+    let m_logout = new_left_button("🚪", "Log Out...", &["sidebar-btn"]);
     let m_sleep = new_left_button("💤", "Sleep", &["sidebar-btn"]);
     let m_restart = new_left_button("🔄", "Restart...", &["sidebar-btn"]);
     let m_shutdown = new_left_button("⏻", "Shut Down...", &["danger-btn"]);
@@ -526,6 +550,7 @@ unsafe fn build_desktop_shell(
     gtk_box_append(menu_panel, m_settings);
     gtk_box_append(menu_panel, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     gtk_box_append(menu_panel, m_lock);
+    gtk_box_append(menu_panel, m_logout);
     gtk_box_append(menu_panel, m_sleep);
     gtk_box_append(menu_panel, m_restart);
     gtk_box_append(menu_panel, m_shutdown);
@@ -559,6 +584,10 @@ unsafe fn build_desktop_shell(
             ol();
         });
     }
+    connect_signal(m_logout, "clicked", move || {
+        gtk_widget_set_visible(menu_panel, 0);
+        trigger_power("logout");
+    });
     connect_signal(m_sleep, "clicked", move || {
         gtk_widget_set_visible(menu_panel, 0);
         trigger_power("sleep");
@@ -833,8 +862,23 @@ unsafe fn build_login_screen(
     let title = cstr("BijiOS Login");
     gtk_window_set_title(win, title.as_ptr());
     gtk_window_set_decorated(win, 0);
+    gtk_window_set_modal(win, 1);
     gtk_window_fullscreen(win);
     add_css(win, "bijios-login-window");
+
+    // Always force true 100% fullscreen + ABOVE layer on realize/map so desktop & apps cannot be clicked
+    connect_signal(win, "realize", move || {
+        set_x11_lock_window(win);
+    });
+    connect_signal(win, "map", move || {
+        set_x11_lock_window(win);
+        timeout_add_ms(100, move || {
+            if gtk_widget_get_visible(win) != 0 {
+                set_x11_lock_window(win);
+            }
+            false
+        });
+    });
 
     let outer = new_box(GTK_ORIENTATION_VERTICAL, 0, &[]);
     gtk_widget_set_hexpand(outer, 1);
@@ -944,6 +988,7 @@ unsafe fn build_login_screen(
         col
     };
 
+    gtk_box_append(power_row, make_power_action("🚪", "Log Out", "logout"));
     gtk_box_append(power_row, make_power_action("💤", "Sleep", "sleep"));
     gtk_box_append(power_row, make_power_action("🔄", "Restart", "restart"));
     gtk_box_append(power_row, make_power_action("⏻", "Shut Down", "poweroff"));
@@ -965,6 +1010,7 @@ unsafe fn build_login_screen(
                 gtk_widget_set_visible(err_lbl, 0);
                 gtk_widget_set_visible(win, 0);
                 gtk_widget_set_visible(desktop_win, 1);
+                set_x11_desktop_window(desktop_win);
                 gtk_window_present(desktop_win);
             } else {
                 set_label_text(err_lbl, "Invalid username or password. Please try again.");

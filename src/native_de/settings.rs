@@ -974,10 +974,12 @@ unsafe fn build_general_page(
 
     let pwr_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
     let btn_lock = new_button("🔒 Lock Screen", &["toolbar-btn"]);
+    let btn_logout = new_button("🚪 Log Out", &["toolbar-btn"]);
     let btn_sleep = new_button("💤 Sleep", &["toolbar-btn"]);
     let btn_reboot = new_button("🔄 Restart", &["accent-gold-btn"]);
     let btn_off = new_button("⏻ Shut Down", &["danger-btn"]);
     gtk_box_append(pwr_row, btn_lock);
+    gtk_box_append(pwr_row, btn_logout);
     gtk_box_append(pwr_row, btn_sleep);
     gtk_box_append(pwr_row, btn_reboot);
     gtk_box_append(pwr_row, btn_off);
@@ -989,6 +991,9 @@ unsafe fn build_general_page(
             ol();
         });
     }
+    connect_signal(btn_logout, "clicked", || {
+        crate::native_de::trigger_power("logout");
+    });
     connect_signal(btn_sleep, "clicked", || {
         let _ = Command::new("systemctl").arg("suspend").spawn();
     });
