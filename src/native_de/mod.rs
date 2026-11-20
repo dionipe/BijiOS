@@ -3,6 +3,7 @@
 
 pub mod activity;
 pub mod apps;
+pub mod dock;
 pub mod gtk4_ffi;
 pub mod pancer;
 pub mod settings;
@@ -136,6 +137,7 @@ pub fn get_minimize_effect() -> &'static str {
 pub struct DesktopSettings {
     pub dock_size: i32,
     pub dock_hidden: bool,
+    pub pinned_apps: Vec<String>,
     pub magnification_enabled: bool,
     pub magnification: f64,
     pub dock_position: String,   // "bottom", "left", "right"
@@ -151,6 +153,7 @@ impl Default for DesktopSettings {
         Self {
             dock_size: 40,
             dock_hidden: false,
+            pinned_apps: dock::default_pinned_apps(),
             magnification_enabled: true,
             magnification: 1.25,
             dock_position: "bottom".to_string(),
@@ -227,6 +230,13 @@ impl DesktopSettings {
                             }
                         }
                         "dock_hidden" => s.dock_hidden = v == "true",
+                        "pinned_apps" => {
+                            s.pinned_apps = v
+                                .split(',')
+                                .map(|x| x.trim().to_string())
+                                .filter(|x| !x.is_empty())
+                                .collect();
+                        }
                         "magnification_enabled" => s.magnification_enabled = v == "true",
                         "magnification" => {
                             if let Ok(f) = v.parse::<f64>() {
@@ -263,9 +273,10 @@ impl DesktopSettings {
             let _ = fs::create_dir_all(parent);
         }
         let body = format!(
-            "dock_size={}\ndock_hidden={}\nmagnification_enabled={}\nmagnification={:.2}\ndock_position={}\nminimize_effect={}\nanimate_opening={}\nwallpaper={}\ndynamic_phase={}\nuser_avatar={}\n",
+            "dock_size={}\ndock_hidden={}\npinned_apps={}\nmagnification_enabled={}\nmagnification={:.2}\ndock_position={}\nminimize_effect={}\nanimate_opening={}\nwallpaper={}\ndynamic_phase={}\nuser_avatar={}\n",
             self.dock_size,
             self.dock_hidden,
+            self.pinned_apps.join(","),
             self.magnification_enabled,
             self.magnification,
             self.dock_position,
@@ -283,7 +294,7 @@ pub struct DesktopHandles {
     pub desktop_win: *mut GtkWidget,
     pub root_vbox: *mut GtkWidget,
     pub body_hbox: *mut GtkWidget,
-    pub dock_wrap: *mut GtkWidget,
+    pub dock_win: *mut GtkWidget,
     pub dock_box: *mut GtkWidget,
     pub menubar_avatar_slot: *mut GtkWidget,
     pub login_avatar_slot: Rc<RefCell<*mut GtkWidget>>,
@@ -371,46 +382,38 @@ pub unsafe fn apply_desktop_settings(handles: &DesktopHandles) {
     };
 
     let css_str = format!(
-        "{}\n.floating-dock {{ padding: {}px; border-radius: {}px; }}\nbutton.dock-btn {{ min-width: {}px; min-height: {}px; padding: 0px; font-size: {}px; border-radius: {}px; transition: all 140ms ease; }}\n{}\n{}\n",
+        "{}\n.bijios-dock {{ padding: {}px; border-radius: {}px; }}\nbutton.dock-btn {{ min-width: {}px; min-height: {}px; padding: 0px; font-size: {}px; border-radius: {}px; transition: all 140ms ease; }}\n{}\n{}\n",
         wp_css, dock_pad, dock_rad, sz, sz, font_sz, radius, hover_rule, bounce_rule
     );
     let c_css = cstr(&css_str);
     gtk_css_provider_load_from_string(handles.dynamic_css, c_css.as_ptr());
 
-    // 3. Apply Dock Visibility (Hide / Unhide) & Position (Bottom / Left / Right) live
-    gtk_widget_set_visible(handles.dock_wrap, if s.dock_hidden { 0 } else { 1 });
-    let parent = gtk_widget_get_parent(handles.dock_wrap);
-    g_object_ref(handles.dock_wrap as GPointer);
-    if parent == handles.root_vbox {
-        gtk_box_remove(handles.root_vbox, handles.dock_wrap);
-    } else if parent == handles.body_hbox {
-        gtk_box_remove(handles.body_hbox, handles.dock_wrap);
-    }
-
+    // 3. Apply Floating Dock Orientation, Openbox Margins, Visibility & Position live
     match s.dock_position.as_str() {
-        "left" => {
+        "left" | "right" => {
             gtk_orientable_set_orientation(handles.dock_box, GTK_ORIENTATION_VERTICAL);
-            gtk_widget_set_halign(handles.dock_wrap, GTK_ALIGN_START);
-            gtk_widget_set_valign(handles.dock_wrap, GTK_ALIGN_CENTER);
-            set_margins(handles.dock_wrap, 0, 0, 8, 0);
-            gtk_box_prepend(handles.body_hbox, handles.dock_wrap);
-        }
-        "right" => {
-            gtk_orientable_set_orientation(handles.dock_box, GTK_ORIENTATION_VERTICAL);
-            gtk_widget_set_halign(handles.dock_wrap, GTK_ALIGN_END);
-            gtk_widget_set_valign(handles.dock_wrap, GTK_ALIGN_CENTER);
-            set_margins(handles.dock_wrap, 0, 0, 0, 8);
-            gtk_box_append(handles.body_hbox, handles.dock_wrap);
         }
         _ => {
             gtk_orientable_set_orientation(handles.dock_box, GTK_ORIENTATION_HORIZONTAL);
-            gtk_widget_set_halign(handles.dock_wrap, GTK_ALIGN_CENTER);
-            gtk_widget_set_valign(handles.dock_wrap, GTK_ALIGN_END);
-            set_margins(handles.dock_wrap, 0, 8, 0, 0);
-            gtk_box_append(handles.root_vbox, handles.dock_wrap);
         }
     }
-    g_object_unref(handles.dock_wrap as GPointer);
+    dock::sync_openbox_margins(s.dock_hidden, &s.dock_position, sz);
+
+    let desk_vis = gtk_widget_get_visible(handles.desktop_win) != 0;
+    if s.dock_hidden || !desk_vis {
+        gtk_widget_set_visible(handles.dock_win, 0);
+    } else {
+        gtk_widget_set_visible(handles.dock_win, 1);
+        let dw = handles.dock_win;
+        let pos_c = s.dock_position.clone();
+        dock::reposition_dock_window(dw, &pos_c);
+        timeout_add_ms(30, move || {
+            if gtk_widget_get_visible(dw) != 0 {
+                dock::reposition_dock_window(dw, &pos_c);
+            }
+            false
+        });
+    }
 
     // 4. Refresh User Profile Avatars across Top Menu Bar & Login Screen
     refresh_user_avatars(handles);
@@ -475,10 +478,16 @@ unsafe fn build_desktop_shell(
     gtk_widget_set_hexpand(body_hbox, 1);
     gtk_widget_set_vexpand(body_hbox, 1);
 
-    // Dock container & inner dock box (re-parented live by Dock Position setting)
-    let dock_wrap = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+    // Dedicated Floating Above-All Dock Window (floats over maximized windows!)
+    let dock_win = gtk_window_new();
+    gtk_window_set_application(dock_win, app);
+    let dock_title = cstr("BijiOS Dock");
+    gtk_window_set_title(dock_win, dock_title.as_ptr());
+    gtk_window_set_decorated(dock_win, 0);
+    gtk_window_set_resizable(dock_win, 0);
+    add_css(dock_win, "dock-floating-win");
     let dock = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &["bijios-dock"]);
-    gtk_box_append(dock_wrap, dock);
+    gtk_window_set_child(dock_win, dock);
 
     // Top Menu Bar live user avatar slot
     let menubar_avatar_slot = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
@@ -488,7 +497,7 @@ unsafe fn build_desktop_shell(
         desktop_win: win,
         root_vbox: root,
         body_hbox,
-        dock_wrap,
+        dock_win,
         dock_box: dock,
         menubar_avatar_slot,
         login_avatar_slot,
@@ -496,6 +505,14 @@ unsafe fn build_desktop_shell(
         dynamic_css,
         settings: Rc::new(RefCell::new(DesktopSettings::load())),
     });
+
+    {
+        let h_m = Rc::clone(&handles);
+        connect_signal(dock_win, "map", move || {
+            let pos = h_m.settings.borrow().dock_position.clone();
+            dock::reposition_dock_window(dock_win, &pos);
+        });
+    }
 
     let on_lock: Rc<dyn Fn()> = {
         let login_holder = Rc::clone(&login_win_holder);
@@ -767,137 +784,13 @@ unsafe fn build_desktop_shell(
     gtk_box_append(root, body_hbox);
 
     // =========================================================================
-    // 3. Liquid Glass Floating Dock (Live Size, Magnification, Position & Bounce)
+    // 3. Dynamic Floating Above-All Dock (Live Window Detection, Keep in Dock,
+    //    Single-Instance Focus, Right-Click Open New Window & Auto-Hide)
     // =========================================================================
-    let dock_items: [(&str, &str, &str, &str); 14] = [
-        ("finder", "📁", "Akar - File Manager", "icon-finder"),
-        ("launchpad", "🚀", "Semai - App Launcher", "icon-launchpad"),
-        ("bibit", "🛍️", "Bibit - Debian App Store", "icon-bibit"),
-        ("pancer", "💻", "Pancer - Terminal", "icon-pancer"),
-        ("wordcraft", "📝", "WordCraft (Storytold — Apache-2.0)", "icon-wordcraft"),
-        ("gridcraft", "📊", "GridCraft (Storytold — Apache-2.0)", "icon-gridcraft"),
-        ("deckcraft", "📽️", "DeckCraft (Storytold — Apache-2.0)", "icon-deckcraft"),
-        ("pdfcraft", "📕", "PDFCraft (Storytold — Apache-2.0)", "icon-pdfcraft"),
-        ("notes", "🗒️", "BijiOS Notes", "icon-notes"),
-        ("calculator", "🧮", "Calculator", "icon-calculator"),
-        ("activity", "📈", "Activity Monitor", "icon-activity"),
-        ("settings", "⚙️", "System Settings", "icon-settings"),
-        ("about", "", "About BijiOS 1.0.0 (Padi)", "icon-about"),
-        ("lock", "🔒", "Lock Screen", "icon-lock"),
-    ];
-
-    for (id, icon, tip, icon_cls) in dock_items {
-        let btn = if id == "about" {
-            let b = gtk_button_new();
-            add_css(b, "dock-btn");
-            add_css(b, icon_cls);
-            gtk_button_set_child(b, new_logo_image(24, false));
-            b
-        } else {
-            new_button(icon, &["dock-btn", icon_cls])
-        };
-        let t = cstr(tip);
-        gtk_widget_set_tooltip_text(btn, t.as_ptr());
-        gtk_box_append(dock, btn);
-
-        let id_s = id.to_string();
-        let ol = Rc::clone(&on_lock);
-        let h = Rc::clone(&handles);
-        connect_signal(btn, "clicked", move || {
-            // Animate opening applications (Dock icon bounce)
-            if get_animate_opening() {
-                add_css(btn, "dock-bouncing");
-                timeout_add_ms(260, move || {
-                    remove_css(btn, "dock-bouncing");
-                    false
-                });
-            }
-            match id_s.as_str() {
-                "finder" => apps::open_finder(app),
-                "launchpad" => apps::open_launchpad(app, Rc::clone(&h), Rc::clone(&ol)),
-                "bibit" => apps::open_bibit(app),
-                "pancer" => apps::open_pancer(app),
-                "wordcraft" => apps::open_wordcraft(app, None),
-                "gridcraft" => apps::open_gridcraft(app),
-                "deckcraft" => apps::open_deckcraft(None),
-                "pdfcraft" => apps::open_pdfcraft(None),
-                "notes" => apps::open_notes(app),
-                "calculator" => apps::open_calculator(app),
-                "activity" => apps::open_activity_monitor(app),
-                "settings" => apps::open_settings(app, Rc::clone(&h), Rc::clone(&ol)),
-                "about" => apps::open_about(app),
-                "lock" => ol(),
-                _ => {}
-            }
-        });
-    }
+    dock::setup_floating_dock(app, Rc::clone(&handles), Rc::clone(&on_lock));
 
     // Apply persisted Dock Size, Magnification, Position, Wallpaper & Animation settings
     apply_desktop_settings(&handles);
-
-    // Automatically Hide & Show the Dock when pointer approaches the Dock screen edge
-    {
-        let h_auto = Rc::clone(&handles);
-        let revealed = Rc::new(std::cell::Cell::new(false));
-        let leave_ticks = Rc::new(std::cell::Cell::new(0u8));
-        timeout_add_ms(110, move || {
-            let (auto_hide, pos, sz) = {
-                let s = h_auto.settings.borrow();
-                (s.dock_hidden, s.dock_position.clone(), s.dock_size)
-            };
-            if !auto_hide {
-                if revealed.get() {
-                    revealed.set(false);
-                }
-                leave_ticks.set(0);
-                if gtk_widget_get_visible(h_auto.dock_wrap) == 0 {
-                    gtk_widget_set_visible(h_auto.dock_wrap, 1);
-                }
-                return true;
-            }
-            if gtk_widget_get_visible(win) == 0 {
-                return true;
-            }
-            let (sw, sh) = get_x11_screen_size();
-            let Some((px, py)) = get_x11_pointer_pos() else {
-                return true;
-            };
-            if sw <= 0 || sh <= 0 {
-                return true;
-            }
-            let edge_px = 14;
-            let keep_px = (sz + 46).max(64);
-            let near_edge = match pos.as_str() {
-                "left" => px <= edge_px,
-                "right" => px >= sw - edge_px,
-                _ => py >= sh - edge_px,
-            };
-            let inside_band = match pos.as_str() {
-                "left" => px <= keep_px,
-                "right" => px >= sw - keep_px,
-                _ => py >= sh - keep_px,
-            };
-
-            if revealed.get() {
-                if inside_band {
-                    leave_ticks.set(0);
-                } else {
-                    let t = leave_ticks.get().saturating_add(1);
-                    leave_ticks.set(t);
-                    if t >= 3 {
-                        revealed.set(false);
-                        leave_ticks.set(0);
-                        gtk_widget_set_visible(h_auto.dock_wrap, 0);
-                    }
-                }
-            } else if near_edge {
-                revealed.set(true);
-                leave_ticks.set(0);
-                gtk_widget_set_visible(h_auto.dock_wrap, 1);
-            }
-            true
-        });
-    }
 
     let active_user_t = Rc::clone(&active_user);
     let login_holder_t = Rc::clone(&login_win_holder);
@@ -920,12 +813,16 @@ unsafe fn build_desktop_shell(
         );
         gtk_progress_bar_set_fraction(w_bar, p);
 
-        // Auto-adapt Desktop & Lock Screen when VNC / xrandr dynamically resizes the screen
+        // Auto-adapt Desktop, Floating Dock & Lock Screen when VNC / xrandr dynamically resizes the screen
         let cur_sz = get_x11_screen_size();
         if cur_sz.0 > 0 && cur_sz.1 > 0 && cur_sz != last_screen.get() {
             last_screen.set(cur_sz);
             if gtk_widget_get_visible(win) != 0 {
                 set_x11_desktop_window(win);
+            }
+            if gtk_widget_get_visible(dock_win) != 0 {
+                let pos = handles.settings.borrow().dock_position.clone();
+                dock::reposition_dock_window(dock_win, &pos);
             }
             let lw = *login_holder_t.borrow();
             if !lw.is_null() && gtk_widget_get_visible(lw) != 0 {

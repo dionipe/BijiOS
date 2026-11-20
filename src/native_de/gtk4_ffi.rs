@@ -433,6 +433,30 @@ extern "C" {
         width: c_uint,
         height: c_uint,
     ) -> c_int;
+    pub fn XMoveWindow(display: GPointer, window: c_ulong, x: c_int, y: c_int) -> c_int;
+    pub fn XMapRaised(display: GPointer, window: c_ulong) -> c_int;
+    pub fn XGetWindowProperty(
+        display: GPointer,
+        w: c_ulong,
+        property: c_ulong,
+        long_offset: c_long,
+        long_length: c_long,
+        delete: c_int,
+        req_type: c_ulong,
+        actual_type_return: *mut c_ulong,
+        actual_format_return: *mut c_int,
+        nitems_return: *mut c_ulong,
+        bytes_after_return: *mut c_ulong,
+        prop_return: *mut *mut u8,
+    ) -> c_int;
+    pub fn XSendEvent(
+        display: GPointer,
+        w: c_ulong,
+        propagate: c_int,
+        event_mask: c_long,
+        event_send: GPointer,
+    ) -> c_int;
+    pub fn XFree(data: GPointer) -> c_int;
     pub fn XRaiseWindow(display: GPointer, window: c_ulong) -> c_int;
     pub fn XFlush(display: GPointer) -> c_int;
 }
@@ -771,6 +795,39 @@ pub unsafe fn new_deb_icon_tile_button(
     gtk_box_append(col, lbl);
     gtk_button_set_child(btn, col);
     btn
+}
+
+/// Compact native Freedesktop icon widget for Dock buttons (with emoji fallback)
+pub unsafe fn new_deb_icon_widget(
+    icon_name: &str,
+    fallback_emoji: &str,
+    size: i32,
+) -> *mut GtkWidget {
+    if let Some(file_path) = resolve_desktop_icon_file(icon_name) {
+        let c = cstr(&file_path);
+        let img = gtk_image_new_from_file(c.as_ptr());
+        gtk_image_set_pixel_size(img, size);
+        gtk_widget_set_halign(img, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(img, GTK_ALIGN_CENTER);
+        return img;
+    }
+    if !icon_name.trim().is_empty() {
+        let display = gdk_display_get_default();
+        let theme = if !display.is_null() {
+            gtk_icon_theme_get_for_display(display)
+        } else {
+            std::ptr::null_mut()
+        };
+        let c_name = cstr(icon_name.trim());
+        if !theme.is_null() && gtk_icon_theme_has_icon(theme, c_name.as_ptr()) != 0 {
+            let img = gtk_image_new_from_icon_name(c_name.as_ptr());
+            gtk_image_set_pixel_size(img, size);
+            gtk_widget_set_halign(img, GTK_ALIGN_CENTER);
+            gtk_widget_set_valign(img, GTK_ALIGN_CENTER);
+            return img;
+        }
+    }
+    new_label(fallback_emoji, &[])
 }
 
 pub unsafe fn new_box(orientation: c_int, spacing: i32, css: &[&str]) -> *mut GtkWidget {
@@ -1236,6 +1293,243 @@ pub unsafe fn set_x11_lock_window(win: *mut GtkWidget) {
         gtk_widget_set_size_request(win, w, h);
         XMoveResizeWindow(xdisplay, xid, 0, 0, w as c_uint, h as c_uint);
     }
+    XRaiseWindow(xdisplay, xid);
+    XFlush(xdisplay);
+}
+
+#[derive(Clone, Debug)]
+pub struct X11WindowInfo {
+    pub xid: c_ulong,
+    pub title: String,
+    pub wm_class: String,
+}
+
+unsafe fn get_x11_string_prop(xdisplay: GPointer, xid: c_ulong, prop_name: &str) -> String {
+    let atom = XInternAtom(xdisplay, cstr(prop_name).as_ptr(), 0);
+    let mut actual_type: c_ulong = 0;
+    let mut actual_format: c_int = 0;
+    let mut nitems: c_ulong = 0;
+    let mut bytes_after: c_ulong = 0;
+    let mut prop: *mut u8 = std::ptr::null_mut();
+    let res = XGetWindowProperty(
+        xdisplay,
+        xid,
+        atom,
+        0,
+        256,
+        0,
+        0, // AnyPropertyType
+        &mut actual_type,
+        &mut actual_format,
+        &mut nitems,
+        &mut bytes_after,
+        &mut prop,
+    );
+    if res != 0 || prop.is_null() || nitems == 0 || actual_format != 8 {
+        if !prop.is_null() {
+            XFree(prop as GPointer);
+        }
+        return String::new();
+    }
+    let slice = std::slice::from_raw_parts(prop, nitems as usize);
+    let s = slice
+        .split(|&b| b == 0)
+        .filter(|part| !part.is_empty())
+        .map(|part| String::from_utf8_lossy(part).into_owned())
+        .collect::<Vec<String>>()
+        .join(" ");
+    XFree(prop as GPointer);
+    s
+}
+
+/// Enumerate all open normal client windows managed by Openbox via `_NET_CLIENT_LIST`.
+pub unsafe fn list_x11_client_windows() -> Vec<X11WindowInfo> {
+    let mut out = Vec::new();
+    let display = gdk_display_get_default();
+    if display.is_null() {
+        return out;
+    }
+    let xdisplay = gdk_x11_display_get_xdisplay(display);
+    if xdisplay.is_null() {
+        return out;
+    }
+    let root = XDefaultRootWindow(xdisplay);
+    let client_list_atom = XInternAtom(xdisplay, cstr("_NET_CLIENT_LIST").as_ptr(), 0);
+    let mut actual_type: c_ulong = 0;
+    let mut actual_format: c_int = 0;
+    let mut nitems: c_ulong = 0;
+    let mut bytes_after: c_ulong = 0;
+    let mut prop: *mut u8 = std::ptr::null_mut();
+    let res = XGetWindowProperty(
+        xdisplay,
+        root,
+        client_list_atom,
+        0,
+        1024,
+        0,
+        33, // XA_WINDOW
+        &mut actual_type,
+        &mut actual_format,
+        &mut nitems,
+        &mut bytes_after,
+        &mut prop,
+    );
+    if res != 0 || prop.is_null() || nitems == 0 || actual_format != 32 {
+        if !prop.is_null() {
+            XFree(prop as GPointer);
+        }
+        return out;
+    }
+    let xids = std::slice::from_raw_parts(prop as *const c_ulong, nitems as usize);
+    for &xid in xids {
+        let mut title = get_x11_string_prop(xdisplay, xid, "_NET_WM_NAME");
+        if title.is_empty() {
+            title = get_x11_string_prop(xdisplay, xid, "WM_NAME");
+        }
+        let wm_class = get_x11_string_prop(xdisplay, xid, "WM_CLASS");
+        if title == "BijiOS Desktop"
+            || title == "BijiOS Login"
+            || title == "BijiOS Dock"
+            || title == "BijiOS Dock Menu"
+        {
+            continue;
+        }
+        out.push(X11WindowInfo {
+            xid,
+            title,
+            wm_class,
+        });
+    }
+    XFree(prop as GPointer);
+    out
+}
+
+#[repr(C)]
+struct XClientMessageEvent {
+    r#type: c_int,
+    serial: c_ulong,
+    send_event: c_int,
+    display: GPointer,
+    window: c_ulong,
+    message_type: c_ulong,
+    format: c_int,
+    data: [c_long; 5],
+}
+
+/// Focus, raise, and unminimize any open X11 window via `_NET_ACTIVE_WINDOW`.
+pub unsafe fn activate_x11_window(xid: c_ulong) {
+    let display = gdk_display_get_default();
+    if display.is_null() {
+        return;
+    }
+    let xdisplay = gdk_x11_display_get_xdisplay(display);
+    if xdisplay.is_null() {
+        return;
+    }
+    let root = XDefaultRootWindow(xdisplay);
+    let active_atom = XInternAtom(xdisplay, cstr("_NET_ACTIVE_WINDOW").as_ptr(), 0);
+    let mut ev = XClientMessageEvent {
+        r#type: 33, // ClientMessage
+        serial: 0,
+        send_event: 1,
+        display: xdisplay,
+        window: xid,
+        message_type: active_atom,
+        format: 32,
+        data: [2, 0, 0, 0, 0], // source indication 2 = pager/dock
+    };
+    XSendEvent(
+        xdisplay,
+        root,
+        0,
+        0x0018_0000, // SubstructureRedirectMask | SubstructureNotifyMask
+        (&mut ev as *mut XClientMessageEvent) as GPointer,
+    );
+    XMapRaised(xdisplay, xid);
+    XFlush(xdisplay);
+}
+
+/// Request any open X11 window to close gracefully via `_NET_CLOSE_WINDOW`.
+pub unsafe fn close_x11_window(xid: c_ulong) {
+    let display = gdk_display_get_default();
+    if display.is_null() {
+        return;
+    }
+    let xdisplay = gdk_x11_display_get_xdisplay(display);
+    if xdisplay.is_null() {
+        return;
+    }
+    let root = XDefaultRootWindow(xdisplay);
+    let close_atom = XInternAtom(xdisplay, cstr("_NET_CLOSE_WINDOW").as_ptr(), 0);
+    let mut ev = XClientMessageEvent {
+        r#type: 33, // ClientMessage
+        serial: 0,
+        send_event: 1,
+        display: xdisplay,
+        window: xid,
+        message_type: close_atom,
+        format: 32,
+        data: [0, 2, 0, 0, 0],
+    };
+    XSendEvent(
+        xdisplay,
+        root,
+        0,
+        0x0018_0000,
+        (&mut ev as *mut XClientMessageEvent) as GPointer,
+    );
+    XFlush(xdisplay);
+}
+
+/// Configure a GTK4 window as a floating above-all X11 Dock window (`_NET_WM_WINDOW_TYPE_DOCK` + `_NET_WM_STATE_ABOVE`)
+pub unsafe fn set_x11_dock_window(win: *mut GtkWidget, x: i32, y: i32) {
+    let display = gdk_display_get_default();
+    if display.is_null() {
+        return;
+    }
+    let surface = gtk_native_get_surface(win);
+    if surface.is_null() {
+        return;
+    }
+    let xdisplay = gdk_x11_display_get_xdisplay(display);
+    let xid = gdk_x11_surface_get_xid(surface);
+    if xdisplay.is_null() || xid == 0 {
+        return;
+    }
+
+    let xa_atom: c_ulong = 4;
+    let type_prop = XInternAtom(xdisplay, cstr("_NET_WM_WINDOW_TYPE").as_ptr(), 0);
+    let dock_type = XInternAtom(xdisplay, cstr("_NET_WM_WINDOW_TYPE_DOCK").as_ptr(), 0);
+    XChangeProperty(
+        xdisplay,
+        xid,
+        type_prop,
+        xa_atom,
+        32,
+        0,
+        (&dock_type as *const c_ulong) as *const u8,
+        1,
+    );
+
+    let state_prop = XInternAtom(xdisplay, cstr("_NET_WM_STATE").as_ptr(), 0);
+    let states: [c_ulong; 4] = [
+        XInternAtom(xdisplay, cstr("_NET_WM_STATE_ABOVE").as_ptr(), 0),
+        XInternAtom(xdisplay, cstr("_NET_WM_STATE_STICKY").as_ptr(), 0),
+        XInternAtom(xdisplay, cstr("_NET_WM_STATE_SKIP_TASKBAR").as_ptr(), 0),
+        XInternAtom(xdisplay, cstr("_NET_WM_STATE_SKIP_PAGER").as_ptr(), 0),
+    ];
+    XChangeProperty(
+        xdisplay,
+        xid,
+        state_prop,
+        xa_atom,
+        32,
+        0,
+        states.as_ptr() as *const u8,
+        states.len() as c_int,
+    );
+
+    XMoveWindow(xdisplay, xid, x, y);
     XRaiseWindow(xdisplay, xid);
     XFlush(xdisplay);
 }

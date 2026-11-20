@@ -1192,6 +1192,43 @@ button.akar-tree-node-active {
     box-shadow: none;
 }
 
+/* Floating Above-All Dock Window, Running Indicator & Right-Click Menu */
+window.dock-floating-win {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+}
+
+.dock-running-dot {
+    background-color: #7FBF6A;
+    border-radius: 999px;
+    min-width: 5px;
+    min-height: 5px;
+    margin-top: 2px;
+    box-shadow: 0 0 6px rgba(127, 191, 106, 0.9);
+}
+
+.dock-running-dot-off {
+    background-color: transparent;
+    min-width: 5px;
+    min-height: 5px;
+    margin-top: 2px;
+}
+
+.dock-sep {
+    background-color: rgba(255, 255, 255, 0.28);
+    min-width: 1px;
+    min-height: 24px;
+    margin: 2px 4px;
+}
+
+window.dock-ctx-win {
+    background-color: rgba(15, 42, 34, 0.96);
+    border: 1px solid rgba(127, 191, 106, 0.45);
+    border-radius: 11px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.52);
+}
+
 .pancer-broadcast-badge {
     background-color: rgba(232, 163, 61, 0.22);
     border: 1px solid #E8A33D;
