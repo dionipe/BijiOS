@@ -588,6 +588,154 @@ unsafe fn open_ssh_host_dialog(
     gtk_widget_grab_focus(e_alias);
 }
 
+// ============================================================================
+// About Pancer Dialog (Structured Key-Value + Hotkeys + Open-Source Credits)
+// ============================================================================
+unsafe fn open_about_pancer(app: *mut GtkApplication, parent_win: *mut GtkWidget) {
+    let dlg = create_app_window(app, "💻 About Pancer", 580, 560);
+    gtk_window_set_resizable(dlg, 0);
+    gtk_window_set_modal(dlg, 1);
+    gtk_window_set_transient_for(dlg, parent_win);
+
+    let scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(scroll, GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    let root = new_box(GTK_ORIENTATION_VERTICAL, 12, &[]);
+    set_margin_all(root, 20);
+
+    // Header Card
+    let hdr_card = new_box(GTK_ORIENTATION_HORIZONTAL, 16, &["app-card"]);
+    let logo = new_logo_image(58, true);
+    gtk_widget_set_valign(logo, GTK_ALIGN_CENTER);
+    let tcol = new_box(GTK_ORIENTATION_VERTICAL, 3, &[]);
+    gtk_widget_set_hexpand(tcol, 1);
+    gtk_widget_set_valign(tcol, GTK_ALIGN_CENTER);
+    let title = new_label("Pancer — BijiOS Native Terminal", &["app-heading"]);
+    gtk_label_set_xalign(title, 0.0);
+    let sub = new_label(
+        "Version 1.0.0 (BijiOS \"Padi\")  •  Pure Rust + GTK4 + VTE4",
+        &["app-muted"],
+    );
+    gtk_label_set_xalign(sub, 0.0);
+    gtk_box_append(tcol, title);
+    gtk_box_append(tcol, sub);
+    gtk_box_append(hdr_card, logo);
+    gtk_box_append(hdr_card, tcol);
+    gtk_box_append(root, hdr_card);
+
+    // Application Details Card (2-column Key / Value)
+    let det_card = new_box(GTK_ORIENTATION_VERTICAL, 6, &["app-card"]);
+    let d_hdr = new_label("💻 APPLICATION DETAILS", &["app-section-title"]);
+    gtk_label_set_xalign(d_hdr, 0.0);
+    gtk_box_append(det_card, d_hdr);
+
+    let kv: [(&str, &str); 5] = [
+        ("Application", "Pancer — Multi-Tab & Split-Pane SSH Terminal"),
+        ("Version", "1.0.0 (Codename: Padi)"),
+        ("Language", "100% Pure Rust (Zero External Crates)"),
+        ("Terminal Engine", "Native GTK4 + libvte-2.91-gtk4 (PTY/TTY)"),
+        ("Shell Features", "Dynamic Host Tab Bar, ~/.ssh/config Manager, ble.sh Auto-Suggestions"),
+    ];
+    for (k, v) in kv {
+        let row = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &[]);
+        let kl = new_label(k, &["kv-key"]);
+        gtk_label_set_xalign(kl, 0.0);
+        gtk_widget_set_size_request(kl, 130, -1);
+        let vl = new_label(v, &["kv-val"]);
+        gtk_label_set_xalign(vl, 0.0);
+        gtk_label_set_wrap(vl, 1);
+        gtk_widget_set_hexpand(vl, 1);
+        gtk_box_append(row, kl);
+        gtk_box_append(row, vl);
+        gtk_box_append(det_card, row);
+    }
+
+    let repo_row = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+    let rk = new_label("Project Links", &["kv-key"]);
+    gtk_label_set_xalign(rk, 0.0);
+    gtk_widget_set_size_request(rk, 130, -1);
+    gtk_box_append(repo_row, rk);
+    gtk_box_append(
+        repo_row,
+        new_link_button("🐙 github.com/dionipe/BijiOS ↗", "https://github.com/dionipe/BijiOS", &["link-pill"]),
+    );
+    gtk_box_append(
+        repo_row,
+        new_link_button("👤 @dionipe ↗", "https://github.com/dionipe", &["link-pill"]),
+    );
+    gtk_box_append(det_card, repo_row);
+    gtk_box_append(root, det_card);
+
+    // Keyboard Shortcuts Card
+    let hk_card = new_box(GTK_ORIENTATION_VERTICAL, 6, &["app-card"]);
+    let hk_hdr = new_label("⌨️ KEYBOARD SHORTCUTS", &["app-section-title"]);
+    gtk_label_set_xalign(hk_hdr, 0.0);
+    gtk_box_append(hk_card, hk_hdr);
+
+    let hk_grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(hk_grid, 4);
+    gtk_grid_set_column_spacing(hk_grid, 16);
+    gtk_grid_set_column_homogeneous(hk_grid, 1);
+
+    let shortcuts: [(&str, &str); 10] = [
+        ("Ctrl+Shift+N", "New Window"),
+        ("Ctrl+Shift+T", "New Tab"),
+        ("Ctrl+Shift+C / V", "Copy / Paste"),
+        ("Ctrl+Shift+K", "Clear Terminal"),
+        ("Ctrl+Shift+U / B", "Duplicate Win / Tab"),
+        ("Ctrl+Shift+D / E", "Split Vert / Horiz"),
+        ("Ctrl+Shift+S", "Hide / Unhide SSH Sidebar"),
+        ("Ctrl+Shift+W", "Close Active Tab"),
+        ("→  or  End", "Accept Auto-Suggestion"),
+        ("Tab / Shift+Tab", "Auto-Completion Menu"),
+    ];
+    for (i, (key, desc)) in shortcuts.iter().enumerate() {
+        let r = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+        let kl = new_label(key, &["act-proc-mono"]);
+        gtk_label_set_xalign(kl, 0.0);
+        gtk_widget_set_size_request(kl, 122, -1);
+        let dl = new_label(desc, &["kv-val"]);
+        gtk_label_set_xalign(dl, 0.0);
+        gtk_box_append(r, kl);
+        gtk_box_append(r, dl);
+        gtk_grid_attach(hk_grid, r, (i % 2) as i32, (i / 2) as i32, 1, 1);
+    }
+    gtk_box_append(hk_card, hk_grid);
+    gtk_box_append(root, hk_card);
+
+    // Open-Source Credits Card
+    let cred_card = new_box(GTK_ORIENTATION_VERTICAL, 6, &["app-card"]);
+    let c_hdr = new_label("📜 OPEN-SOURCE COMPONENTS", &["app-section-title"]);
+    gtk_label_set_xalign(c_hdr, 0.0);
+    gtk_box_append(cred_card, c_hdr);
+
+    let c_pills = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+    gtk_box_append(
+        c_pills,
+        new_link_button("GNOME VTE4 (LGPL-3.0) ↗", "https://gitlab.gnome.org/GNOME/vte", &["link-pill"]),
+    );
+    gtk_box_append(
+        c_pills,
+        new_link_button("ble.sh (BSD-3-Clause) ↗", "https://github.com/akinomyoga/ble.sh", &["link-pill"]),
+    );
+    gtk_box_append(
+        c_pills,
+        new_link_button("bash-completion ↗", "https://github.com/scop/bash-completion", &["link-pill"]),
+    );
+    gtk_box_append(cred_card, c_pills);
+    gtk_box_append(root, cred_card);
+
+    let close_row = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+    gtk_widget_set_halign(close_row, GTK_ALIGN_END);
+    let btn_close = new_button("Close", &["primary-btn"]);
+    connect_signal(btn_close, "clicked", move || gtk_window_close(dlg));
+    gtk_box_append(close_row, btn_close);
+    gtk_box_append(root, close_row);
+
+    gtk_scrolled_window_set_child(scroll, root);
+    gtk_window_set_child(dlg, scroll);
+    gtk_window_present(dlg);
+}
+
 pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBuf>) {
     unsafe {
         let win = create_app_window(app, "💻  Pancer", 1040, 580);
@@ -605,6 +753,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         let btn_file = new_button("File", &["pancer-menu-btn"]);
         let btn_edit = new_button("Edit", &["pancer-menu-btn"]);
         let btn_shell = new_button("Shell", &["pancer-menu-btn"]);
+        let btn_help = new_button("Help", &["pancer-menu-btn"]);
         let mb_spacer = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
         gtk_widget_set_hexpand(mb_spacer, 1);
         let init_sb_vis = load_sidebar_visible();
@@ -618,6 +767,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         gtk_box_append(menubar, btn_file);
         gtk_box_append(menubar, btn_edit);
         gtk_box_append(menubar, btn_shell);
+        gtk_box_append(menubar, btn_help);
         gtk_box_append(menubar, mb_spacer);
         gtk_box_append(menubar, btn_toggle_sb);
         gtk_box_append(root, menubar);
@@ -648,11 +798,13 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         let menu_file = make_dropdown(8);
         let menu_edit = make_dropdown(54);
         let menu_shell = make_dropdown(100);
+        let menu_help = make_dropdown(152);
 
         let any_menu_open = move || -> bool {
             gtk_widget_get_visible(menu_file) != 0
                 || gtk_widget_get_visible(menu_edit) != 0
                 || gtk_widget_get_visible(menu_shell) != 0
+                || gtk_widget_get_visible(menu_help) != 0
         };
 
         let hide_all_menus = move || {
@@ -660,6 +812,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             gtk_widget_set_visible(menu_file, 0);
             gtk_widget_set_visible(menu_edit, 0);
             gtk_widget_set_visible(menu_shell, 0);
+            gtk_widget_set_visible(menu_help, 0);
         };
 
         connect_signal(btn_file, "clicked", move || {
@@ -684,6 +837,14 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             if !vis {
                 gtk_widget_set_visible(menu_backdrop, 1);
                 gtk_widget_set_visible(menu_shell, 1);
+            }
+        });
+        connect_signal(btn_help, "clicked", move || {
+            let vis = gtk_widget_get_visible(menu_help) != 0;
+            hide_all_menus();
+            if !vis {
+                gtk_widget_set_visible(menu_backdrop, 1);
+                gtk_widget_set_visible(menu_help, 1);
             }
         });
 
@@ -1303,6 +1464,13 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         gtk_box_append(menu_shell, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
         gtk_box_append(menu_shell, mi_toggle_sb);
         gtk_box_append(menu_shell, mi_close_tab);
+
+        let mi_about_pancer = new_menu_item("🌱", "About Pancer", "");
+        gtk_box_append(menu_help, mi_about_pancer);
+        connect_signal(mi_about_pancer, "clicked", move || {
+            hide_all_menus();
+            open_about_pancer(app, win);
+        });
 
         let wire = |btn: *mut GtkWidget, f: &Rc<dyn Fn()>| {
             let fc = Rc::clone(f);
