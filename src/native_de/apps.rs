@@ -81,7 +81,6 @@ pub fn scan_installed_deb_apps() -> Vec<NativeDesktopApp> {
                 .to_string();
             if id.is_empty()
                 || id.contains("bijios")
-                || id.contains("dokuhub")
                 || id.starts_with("ai.storyteller.")
             {
                 continue;

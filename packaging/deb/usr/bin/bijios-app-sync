@@ -9,7 +9,7 @@ for src in /usr/share/applications/*.desktop; do
   [ -f "$src" ] || continue
   base="$(basename "$src")"
   case "$base" in
-    bijios.desktop|*dokuhub*) continue ;;
+    bijios.desktop) continue ;;
   esac
 
   dest="/usr/local/share/applications/${base}"

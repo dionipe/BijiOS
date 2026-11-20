@@ -291,7 +291,7 @@ impl HttpServer {
             // Check for user avatar image
             if path.starts_with("/api/users/") && path.ends_with("/avatar") {
                 let user_id = &path["/api/users/".len()..path.len() - "/avatar".len()];
-                let avatar_path = std::path::PathBuf::from("/home/dokuhub/apps/dokuhub/data/storage/avatars")
+                let avatar_path = std::path::PathBuf::from("/var/lib/bijios-desktop/avatars")
                     .join(format!("{}.png", user_id));
                 if avatar_path.exists() {
                     if let Ok(bytes) = std::fs::read(&avatar_path) {

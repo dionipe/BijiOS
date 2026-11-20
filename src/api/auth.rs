@@ -606,8 +606,8 @@ sys.exit(0 if rc == 0 else 1)
                 if let Some(comma_pos) = av.find(',') {
                     let b64 = &av[comma_pos + 1..];
                     if let Some(bytes) = crate::api::files::FilesApi::decode_base64(b64) {
-                        let _ = std::fs::create_dir_all("/home/dokuhub/apps/dokuhub/data/storage/avatars");
-                        let avatar_path = format!("/home/dokuhub/apps/dokuhub/data/storage/avatars/{}.png", user_id);
+                        let _ = std::fs::create_dir_all("/var/lib/bijios-desktop/avatars");
+                        let avatar_path = format!("/var/lib/bijios-desktop/avatars/{}.png", user_id);
                         let _ = std::fs::write(&avatar_path, &bytes);
                         let cache_bust = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
                         db_lock.users[user_idx].avatar = format!("/api/users/{}/avatar?v={}", user_id, cache_bust);

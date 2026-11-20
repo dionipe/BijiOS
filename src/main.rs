@@ -33,19 +33,17 @@ fn main() -> std::io::Result<()> {
     }
 
     // Support Debian system-wide paths (/usr/share/bijios-desktop/static & /var/lib/bijios-desktop/db)
-    let static_dir = if let Ok(s) = env::var("BIJIOS_STATIC_DIR").or_else(|_| env::var("DOKUHUB_STATIC_DIR")) {
+    let static_dir = if let Ok(s) = env::var("BIJIOS_STATIC_DIR") {
         PathBuf::from(s)
     } else if base_dir.join("static").exists() {
         base_dir.join("static")
     } else if PathBuf::from("/usr/share/bijios-desktop/static").exists() {
         PathBuf::from("/usr/share/bijios-desktop/static")
-    } else if PathBuf::from("/usr/share/dokuhub/static").exists() {
-        PathBuf::from("/usr/share/dokuhub/static")
     } else {
         base_dir.join("static")
     };
 
-    let db_dir = if let Ok(d) = env::var("BIJIOS_DATA_DIR").or_else(|_| env::var("DOKUHUB_DATA_DIR")) {
+    let db_dir = if let Ok(d) = env::var("BIJIOS_DATA_DIR") {
         PathBuf::from(d)
     } else if base_dir.join("data").join("db").exists() || base_dir.join("static").exists() {
         base_dir.join("data").join("db")

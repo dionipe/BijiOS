@@ -2,7 +2,6 @@
 # BijiOS Full Native Desktop Environment Session Launcher (Pure Rust + GTK4 + Openbox, Zero Chromium)
 
 export BIJIOS_DE_MODE=1
-export DOKUHUB_DE_MODE=1
 export BIJIOS_STATIC_DIR="/usr/share/bijios-desktop/static"
 export BIJIOS_DATA_DIR="/var/lib/bijios-desktop/db"
 export PORT="${PORT:-3000}"

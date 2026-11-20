@@ -20,7 +20,7 @@ impl OsApi {
     /// GET /api/os/status — Linux DE telemetry (hostname, distro, battery, wifi, memory, de_mode)
     pub fn status() -> (u16, String) {
         let hostname = fs::read_to_string("/etc/hostname")
-            .unwrap_or_else(|_| "dokuhub-os".to_string())
+            .unwrap_or_else(|_| "BijiOS".to_string())
             .trim()
             .to_string();
 
@@ -74,7 +74,7 @@ impl OsApi {
             }
         }
 
-        let de_mode = std::env::var("DOKUHUB_DE_MODE").unwrap_or_default() == "1";
+        let de_mode = std::env::var("BIJIOS_DE_MODE").unwrap_or_default() == "1";
 
         let json = format!(
             r#"{{"success":true,"hostname":"{}","distro":"{}","has_battery":{},"battery_percent":{},"battery_status":"{}","wifi_ssid":"{}","de_mode":{}}}"#,
@@ -149,7 +149,7 @@ impl OsApi {
                     .and_then(|s| s.to_str())
                     .unwrap_or("")
                     .to_string();
-                if id.is_empty() || id.contains("dokuhub") {
+                if id.is_empty() || id.contains("bijios") {
                     continue;
                 }
 

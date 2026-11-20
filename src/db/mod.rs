@@ -1,4 +1,4 @@
-//! TOON Database Engine for DokuHub
+//! TOON Database Engine for BijiOS
 //! Stores all records formatted in TOON v4 specification.
 
 use crate::auth::Role;
@@ -197,7 +197,7 @@ impl Database {
             .collect();
         let content = format!(
             "{}\n{}",
-            ToonSerializer::serialize_meta(&[("schema", "tenants_v4"), ("app", "dokuhub")]),
+            ToonSerializer::serialize_meta(&[("schema", "tenants_v4"), ("app", "bijios")]),
             ToonSerializer::serialize_table("tenants", &headers, &rows)
         );
         fs::write(self.db_dir.join("tenants.toon"), content).unwrap_or_default();
@@ -268,7 +268,7 @@ impl Database {
             .collect();
         let content = format!(
             "{}\n{}",
-            ToonSerializer::serialize_meta(&[("schema", "users_v4"), ("app", "dokuhub")]),
+            ToonSerializer::serialize_meta(&[("schema", "users_v4"), ("app", "bijios")]),
             ToonSerializer::serialize_table("users", &headers, &rows)
         );
         fs::write(self.db_dir.join("users.toon"), content).unwrap_or_default();
@@ -357,7 +357,7 @@ impl Database {
             .collect();
         let content = format!(
             "{}\n{}",
-            ToonSerializer::serialize_meta(&[("schema", "files_v4"), ("app", "dokuhub")]),
+            ToonSerializer::serialize_meta(&[("schema", "files_v4"), ("app", "bijios")]),
             ToonSerializer::serialize_table("files", &headers, &rows)
         );
         fs::write(self.db_dir.join("files.toon"), content).unwrap_or_default();
@@ -461,7 +461,7 @@ impl Database {
             .collect();
         let content = format!(
             "{}\n{}",
-            ToonSerializer::serialize_meta(&[("schema", "shares_v4"), ("app", "dokuhub")]),
+            ToonSerializer::serialize_meta(&[("schema", "shares_v4"), ("app", "bijios")]),
             ToonSerializer::serialize_table("shares", &headers, &rows)
         );
         fs::write(self.db_dir.join("shares.toon"), content).unwrap_or_default();
@@ -538,7 +538,7 @@ impl Database {
             .collect();
         let content = format!(
             "{}\n{}",
-            ToonSerializer::serialize_meta(&[("schema", "notes_v4"), ("app", "dokuhub")]),
+            ToonSerializer::serialize_meta(&[("schema", "notes_v4"), ("app", "bijios")]),
             ToonSerializer::serialize_table("notes", &headers, &rows)
         );
         fs::write(self.db_dir.join("notes.toon"), content).unwrap_or_default();
@@ -610,7 +610,7 @@ impl Database {
             .collect();
         let content = format!(
             "{}\n{}",
-            ToonSerializer::serialize_meta(&[("schema", "rooms_v4"), ("app", "dokuhub")]),
+            ToonSerializer::serialize_meta(&[("schema", "rooms_v4"), ("app", "bijios")]),
             ToonSerializer::serialize_table("rooms", &headers, &rows)
         );
         fs::write(self.db_dir.join("rooms.toon"), content).unwrap_or_default();
@@ -667,7 +667,7 @@ impl Database {
             .collect();
         let content = format!(
             "{}\n{}",
-            ToonSerializer::serialize_meta(&[("schema", "api_keys_v4"), ("app", "dokuhub")]),
+            ToonSerializer::serialize_meta(&[("schema", "api_keys_v4"), ("app", "bijios")]),
             ToonSerializer::serialize_table("api_keys", &headers, &rows)
         );
         fs::write(self.db_dir.join("api_keys.toon"), content).unwrap_or_default();

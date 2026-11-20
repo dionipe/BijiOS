@@ -14,7 +14,6 @@ PRIMARY_USER="$(awk -F: '$3 >= 1000 && $3 < 60000 { print $1; exit }' /etc/passw
 PRIMARY_HOME="$(awk -F: '$3 >= 1000 && $3 < 60000 { print $6; exit }' /etc/passwd || true)"
 
 mkdir -p /etc/lightdm/lightdm.conf.d
-rm -f /etc/lightdm/lightdm.conf.d/*dokuhub*.conf 2>/dev/null || true
 
 if [ -n "${PRIMARY_USER}" ]; then
   groupadd -f autologin 2>/dev/null || true
@@ -31,7 +30,7 @@ greeter-session=lightdm-gtk-greeter
 allow-guest=false
 EOF
 
-  # Clear stale cached session (e.g., dokuhub / liquid-de) so LightDM autologin always finds 'bijios'
+  # Ensure LightDM user session defaults to 'bijios'
   if [ -n "${PRIMARY_HOME}" ] && [ -d "${PRIMARY_HOME}" ]; then
     cat >"${PRIMARY_HOME}/.dmrc" <<EOF
 [Desktop]
@@ -103,19 +102,6 @@ EOF
   fi
 fi
 
-# Migrate legacy DokuHub strings in local TOON database to BijiOS
-if [ -d /var/lib/bijios-desktop/db ]; then
-  find /var/lib/bijios-desktop/db -type f \( -name "*.toon" -o -name "*.dat" -o -name "*.md" -o -name "*.jsonl" \) \
-    -exec sed -i -e 's/DokuHub/BijiOS/g' -e 's/Dokuhub/BijiOS/g' -e 's/DokuMeet/BijiMeet/g' -e 's/admin@dokuhub\.io/admin@bijios.local/g' {} + 2>/dev/null || true
-fi
-
-# Clear stale Service Worker & HTTP cache in bijios-shell so updated JS/HTML loads immediately
-if [ -n "${PRIMARY_HOME}" ] && [ -d "${PRIMARY_HOME}/.config/bijios-shell/Default" ]; then
-  rm -rf "${PRIMARY_HOME}/.config/bijios-shell/Default/Service Worker" \
-         "${PRIMARY_HOME}/.config/bijios-shell/Default/Cache" \
-         "${PRIMARY_HOME}/.config/bijios-shell/Default/Code Cache" 2>/dev/null || true
-fi
-
 # Ensure Caps Lock is turned OFF on virtual/physical keyboard and active X11 display
 for led in /sys/class/leds/*capslock*/brightness; do
   [ -w "$led" ] && echo 0 > "$led" 2>/dev/null || true
@@ -137,8 +123,6 @@ except Exception:
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl stop dokuhub.service 2>/dev/null || true
-  systemctl disable dokuhub.service 2>/dev/null || true
   systemctl daemon-reload || true
   systemctl set-default graphical.target || true
   systemctl enable bijios-desktop.service || true

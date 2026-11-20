@@ -232,7 +232,7 @@ impl SettingsApi {
         }
 
         let (fs_total, fs_used, fs_free) = {
-            let s1 = Self::get_real_fs_stat("/home/dokuhub/apps");
+            let s1 = Self::get_real_fs_stat("/var/lib/bijios-desktop");
             if s1.0 > 0 {
                 s1
             } else {
@@ -330,7 +330,7 @@ impl SettingsApi {
 
         // Real size of TOON v4 database files on disk
         let mut toon_db_bytes = 0u64;
-        if let Ok(entries) = fs::read_dir("/home/dokuhub/apps/dokuhub/data/db") {
+        if let Ok(entries) = fs::read_dir("/var/lib/bijios-desktop/db") {
             for entry in entries.flatten() {
                 if let Ok(meta) = entry.metadata() {
                     toon_db_bytes += meta.len();
@@ -341,7 +341,7 @@ impl SettingsApi {
             toon_db_bytes = 14820;
         }
 
-        let dokuhub_data_bytes = total_file_bytes + toon_db_bytes + notes_bytes;
+        let bijios_data_bytes = total_file_bytes + toon_db_bytes + notes_bytes;
         let disk_used_percent = if fs_total > 0 {
             ((fs_used as f64 / fs_total as f64) * 1000.0).round() / 10.0
         } else {
@@ -473,7 +473,7 @@ impl SettingsApi {
                     "disk_used_bytes": {},
                     "disk_free_bytes": {},
                     "disk_used_percent": {},
-                    "dokuhub_data_bytes": {},
+                    "bijios_data_bytes": {},
                     "pool_total_bytes": {},
                     "used_bytes": {},
                     "free_bytes": {},
@@ -511,8 +511,8 @@ impl SettingsApi {
             load1, load5, load15,
             cpu_cores,
             total_kb, free_kb, avail_kb, buffers_kb, cached_kb, used_kb, mem_percent, rss_kb,
-            fs_total, fs_used, fs_free, disk_used_percent, dokuhub_data_bytes,
-            fs_total, dokuhub_data_bytes, fs_free,
+            fs_total, fs_used, fs_free, disk_used_percent, bijios_data_bytes,
+            fs_total, bijios_data_bytes, fs_free,
             files_count, notes_count, rooms_count, tenants_count, users_count,
             docx_count, docx_bytes,
             xlsx_count, xlsx_bytes,
