@@ -835,6 +835,70 @@ unsafe fn build_desktop_shell(
     // Apply persisted Dock Size, Magnification, Position, Wallpaper & Animation settings
     apply_desktop_settings(&handles);
 
+    // Automatically Hide & Show the Dock when pointer approaches the Dock screen edge
+    {
+        let h_auto = Rc::clone(&handles);
+        let revealed = Rc::new(std::cell::Cell::new(false));
+        let leave_ticks = Rc::new(std::cell::Cell::new(0u8));
+        timeout_add_ms(110, move || {
+            let (auto_hide, pos, sz) = {
+                let s = h_auto.settings.borrow();
+                (s.dock_hidden, s.dock_position.clone(), s.dock_size)
+            };
+            if !auto_hide {
+                if revealed.get() {
+                    revealed.set(false);
+                }
+                leave_ticks.set(0);
+                if gtk_widget_get_visible(h_auto.dock_wrap) == 0 {
+                    gtk_widget_set_visible(h_auto.dock_wrap, 1);
+                }
+                return true;
+            }
+            if gtk_widget_get_visible(win) == 0 {
+                return true;
+            }
+            let (sw, sh) = get_x11_screen_size();
+            let Some((px, py)) = get_x11_pointer_pos() else {
+                return true;
+            };
+            if sw <= 0 || sh <= 0 {
+                return true;
+            }
+            let edge_px = 14;
+            let keep_px = (sz + 46).max(64);
+            let near_edge = match pos.as_str() {
+                "left" => px <= edge_px,
+                "right" => px >= sw - edge_px,
+                _ => py >= sh - edge_px,
+            };
+            let inside_band = match pos.as_str() {
+                "left" => px <= keep_px,
+                "right" => px >= sw - keep_px,
+                _ => py >= sh - keep_px,
+            };
+
+            if revealed.get() {
+                if inside_band {
+                    leave_ticks.set(0);
+                } else {
+                    let t = leave_ticks.get().saturating_add(1);
+                    leave_ticks.set(t);
+                    if t >= 3 {
+                        revealed.set(false);
+                        leave_ticks.set(0);
+                        gtk_widget_set_visible(h_auto.dock_wrap, 0);
+                    }
+                }
+            } else if near_edge {
+                revealed.set(true);
+                leave_ticks.set(0);
+                gtk_widget_set_visible(h_auto.dock_wrap, 1);
+            }
+            true
+        });
+    }
+
     let active_user_t = Rc::clone(&active_user);
     let login_holder_t = Rc::clone(&login_win_holder);
     let last_screen = Rc::new(std::cell::Cell::new((0i32, 0i32)));

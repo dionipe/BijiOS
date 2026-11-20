@@ -403,6 +403,17 @@ extern "C" {
     ) -> c_int;
     pub fn XDisplayWidth(display: GPointer, screen: c_int) -> c_int;
     pub fn XDisplayHeight(display: GPointer, screen: c_int) -> c_int;
+    pub fn XQueryPointer(
+        display: GPointer,
+        w: c_ulong,
+        root_return: *mut c_ulong,
+        child_return: *mut c_ulong,
+        root_x_return: *mut c_int,
+        root_y_return: *mut c_int,
+        win_x_return: *mut c_int,
+        win_y_return: *mut c_int,
+        mask_return: *mut c_uint,
+    ) -> c_int;
     pub fn XInternAtom(display: GPointer, atom_name: *const c_char, only_if_exists: c_int) -> c_ulong;
     pub fn XChangeProperty(
         display: GPointer,
@@ -1054,6 +1065,42 @@ pub unsafe fn scroll_window_to_bottom(sw: *mut GtkWidget) {
     if !adj.is_null() {
         let upper = gtk_adjustment_get_upper(adj);
         gtk_adjustment_set_value(adj, upper);
+    }
+}
+
+/// Query global X11 mouse pointer coordinates `(root_x, root_y)` across the entire screen
+pub unsafe fn get_x11_pointer_pos() -> Option<(i32, i32)> {
+    let display = gdk_display_get_default();
+    if display.is_null() {
+        return None;
+    }
+    let xdisplay = gdk_x11_display_get_xdisplay(display);
+    if xdisplay.is_null() {
+        return None;
+    }
+    let root = XDefaultRootWindow(xdisplay);
+    let mut r_ret: c_ulong = 0;
+    let mut c_ret: c_ulong = 0;
+    let mut rx: c_int = 0;
+    let mut ry: c_int = 0;
+    let mut wx: c_int = 0;
+    let mut wy: c_int = 0;
+    let mut mask: c_uint = 0;
+    if XQueryPointer(
+        xdisplay,
+        root,
+        &mut r_ret,
+        &mut c_ret,
+        &mut rx,
+        &mut ry,
+        &mut wx,
+        &mut wy,
+        &mut mask,
+    ) != 0
+    {
+        Some((rx, ry))
+    } else {
+        None
     }
 }
 

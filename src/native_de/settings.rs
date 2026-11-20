@@ -516,13 +516,13 @@ unsafe fn build_dock_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
     gtk_label_set_xalign(hdr, 0.0);
     gtk_box_append(dock_card, hdr);
 
-    // 0. Hide / Unhide Dock
+    // 0. Automatically Hide and Show the Dock
     let hide_row = new_box(GTK_ORIENTATION_HORIZONTAL, 12, &[]);
-    let hide_lbl = new_label("Hide Dock", &["finder-name-btn"]);
+    let hide_lbl = new_label("Automatically hide and show the Dock", &["finder-name-btn"]);
     gtk_label_set_xalign(hide_lbl, 0.0);
     gtk_widget_set_hexpand(hide_lbl, 1);
     let hide_state_lbl = new_label(
-        if cur.dock_hidden { "Hidden" } else { "Visible" },
+        if cur.dock_hidden { "Auto-Hide" } else { "Always Visible" },
         &["app-muted"],
     );
     let hide_switch = gtk_switch_new();
@@ -537,7 +537,10 @@ unsafe fn build_dock_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
         let h = Rc::clone(&handles);
         connect_notify(hide_switch, "notify::active", move || {
             let hidden = gtk_switch_get_active(hide_switch) != 0;
-            set_label_text(hide_state_lbl, if hidden { "Hidden" } else { "Visible" });
+            set_label_text(
+                hide_state_lbl,
+                if hidden { "Auto-Hide" } else { "Always Visible" },
+            );
             h.settings.borrow_mut().dock_hidden = hidden;
             apply_desktop_settings(&h);
         });
