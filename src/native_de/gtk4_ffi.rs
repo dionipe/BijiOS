@@ -342,6 +342,7 @@ extern "C" {
     pub fn vte_terminal_copy_clipboard_format(terminal: *mut GtkWidget, format: c_int);
     pub fn vte_terminal_paste_clipboard(terminal: *mut GtkWidget);
     pub fn vte_terminal_reset(terminal: *mut GtkWidget, clear_tabstops: c_int, clear_history: c_int);
+    pub fn vte_terminal_feed_child(terminal: *mut GtkWidget, text: *const c_char, length: isize);
     pub fn vte_terminal_get_window_title(terminal: *mut GtkWidget) -> *const c_char;
     pub fn pango_font_description_from_string(str_desc: *const c_char) -> GPointer;
     pub fn pango_font_description_free(desc: GPointer);

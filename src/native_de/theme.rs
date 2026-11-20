@@ -893,6 +893,94 @@ button.pancer-menu-backdrop:hover {
     background-color: transparent;
 }
 
+/* Pancer SSH Hosts Sidebar (~/.ssh/config) */
+.pancer-sidebar {
+    background-color: #0B1F19;
+    border-right: 1px solid rgba(127, 191, 106, 0.22);
+    padding: 8px;
+}
+
+.pancer-sidebar-hdr {
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.7px;
+    color: #7FBF6A;
+}
+
+.pancer-ssh-card {
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(127, 191, 106, 0.16);
+    border-radius: 9px;
+    padding: 5px 6px;
+}
+
+.pancer-ssh-card:hover {
+    background-color: rgba(47, 125, 79, 0.24);
+    border-color: rgba(127, 191, 106, 0.45);
+}
+
+button.pancer-ssh-connect {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: #F4EBD9;
+    padding: 1px 2px;
+    box-shadow: none;
+}
+
+.pancer-ssh-alias {
+    font-size: 12px;
+    font-weight: 700;
+    color: #F4EBD9;
+}
+
+.pancer-ssh-meta {
+    font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
+    font-size: 10px;
+    color: rgba(244, 235, 217, 0.62);
+}
+
+button.pancer-ssh-act {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: rgba(244, 235, 217, 0.72);
+    border-radius: 6px;
+    padding: 1px 4px;
+    min-width: 22px;
+    min-height: 22px;
+    font-size: 11px;
+    box-shadow: none;
+}
+
+button.pancer-ssh-act:hover {
+    background-color: rgba(127, 191, 106, 0.24);
+    color: #FFFFFF;
+}
+
+button.pancer-ssh-del:hover {
+    background-color: rgba(239, 68, 68, 0.35);
+    color: #FFFFFF;
+}
+
+button.pancer-sidebar-toggle {
+    background-image: none;
+    background-color: rgba(127, 191, 106, 0.14);
+    border: 1px solid rgba(127, 191, 106, 0.28);
+    color: #F4EBD9;
+    border-radius: 6px;
+    padding: 1px 9px;
+    min-height: 21px;
+    font-size: 11px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+button.pancer-sidebar-toggle:hover {
+    background-color: #2F7D4F;
+    color: #FFFFFF;
+}
+
 .pancer-tabbar {
     background-color: #091814;
     border-bottom: 1px solid rgba(127, 191, 106, 0.22);

@@ -308,9 +308,289 @@ pub fn open_pancer(app: *mut GtkApplication) {
     open_pancer_with_dir(app, None);
 }
 
+// ============================================================================
+// ~/.ssh/config Host Manager (Read, Add, Edit, Delete) + Sidebar Persistence
+// ============================================================================
+#[derive(Clone, Default)]
+struct SshHost {
+    alias: String,
+    hostname: String,
+    user: String,
+    port: String,
+    identity_file: String,
+}
+
+fn ssh_config_path() -> PathBuf {
+    home_dir().join(".ssh").join("config")
+}
+
+fn pancer_conf_path() -> PathBuf {
+    home_dir()
+        .join(".config")
+        .join("bijios-desktop")
+        .join("pancer.conf")
+}
+
+fn load_sidebar_visible() -> bool {
+    if let Ok(txt) = fs::read_to_string(pancer_conf_path()) {
+        for line in txt.lines() {
+            if let Some((k, v)) = line.split_once('=') {
+                if k.trim() == "sidebar_visible" {
+                    return v.trim() != "false";
+                }
+            }
+        }
+    }
+    true
+}
+
+fn save_sidebar_visible(visible: bool) {
+    let p = pancer_conf_path();
+    if let Some(parent) = p.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(p, format!("sidebar_visible={}\n", visible));
+}
+
+fn read_ssh_hosts() -> Vec<SshHost> {
+    let mut hosts = Vec::new();
+    let Ok(txt) = fs::read_to_string(ssh_config_path()) else {
+        return hosts;
+    };
+    let mut cur: Option<SshHost> = None;
+    for raw in txt.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let Some(key) = parts.next() else { continue };
+        let val = parts.collect::<Vec<_>>().join(" ");
+        if key.eq_ignore_ascii_case("Host") {
+            if let Some(h) = cur.take() {
+                hosts.push(h);
+            }
+            if !val.is_empty() && !val.contains('*') && !val.contains('?') {
+                cur = Some(SshHost {
+                    alias: val,
+                    port: "22".to_string(),
+                    ..Default::default()
+                });
+            }
+        } else if let Some(ref mut h) = cur {
+            if key.eq_ignore_ascii_case("HostName") {
+                h.hostname = val;
+            } else if key.eq_ignore_ascii_case("User") {
+                h.user = val;
+            } else if key.eq_ignore_ascii_case("Port") {
+                h.port = val;
+            } else if key.eq_ignore_ascii_case("IdentityFile") {
+                h.identity_file = val;
+            }
+        }
+    }
+    if let Some(h) = cur {
+        hosts.push(h);
+    }
+    hosts
+}
+
+fn format_ssh_host_block(h: &SshHost) -> String {
+    let mut out = format!("Host {}\n", h.alias.trim());
+    if !h.hostname.trim().is_empty() {
+        out.push_str(&format!("    HostName {}\n", h.hostname.trim()));
+    }
+    if !h.user.trim().is_empty() {
+        out.push_str(&format!("    User {}\n", h.user.trim()));
+    }
+    let port = h.port.trim();
+    if !port.is_empty() && port != "22" {
+        out.push_str(&format!("    Port {}\n", port));
+    }
+    if !h.identity_file.trim().is_empty() {
+        out.push_str(&format!("    IdentityFile {}\n", h.identity_file.trim()));
+    }
+    out
+}
+
+/// Rewrite ~/.ssh/config replacing or deleting `target_alias` while preserving all other blocks/comments
+fn update_ssh_config(target_alias: Option<&str>, replacement: Option<&SshHost>) -> bool {
+    let path = ssh_config_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let mut out = String::new();
+    let mut skipping = false;
+    let mut replaced = false;
+
+    for raw in existing.lines() {
+        let trimmed = raw.trim();
+        let mut parts = trimmed.split_whitespace();
+        if let Some(k) = parts.next() {
+            if k.eq_ignore_ascii_case("Host") {
+                let alias_val = parts.collect::<Vec<_>>().join(" ");
+                if target_alias.map(|t| t == alias_val).unwrap_or(false) {
+                    skipping = true;
+                    if let Some(new_h) = replacement {
+                        out.push_str(&format_ssh_host_block(new_h));
+                        replaced = true;
+                    }
+                    continue;
+                } else {
+                    skipping = false;
+                }
+            }
+        }
+        if !skipping {
+            out.push_str(raw);
+            out.push('\n');
+        }
+    }
+
+    if let Some(new_h) = replacement {
+        if !replaced {
+            if !out.is_empty() && !out.ends_with("\n\n") {
+                out.push('\n');
+            }
+            out.push_str(&format_ssh_host_block(new_h));
+        }
+    }
+
+    if fs::write(&path, out).is_ok() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
+        true
+    } else {
+        false
+    }
+}
+
+unsafe fn open_ssh_host_dialog(
+    app: *mut GtkApplication,
+    parent_win: *mut GtkWidget,
+    editing: Option<SshHost>,
+    on_saved: Rc<RefCell<Box<dyn Fn()>>>,
+) {
+    let is_edit = editing.is_some();
+    let title = if is_edit {
+        "✏️ Edit SSH Host (~/.ssh/config)"
+    } else {
+        "➕ Add SSH Host (~/.ssh/config)"
+    };
+    let dlg = create_app_window(app, title, 450, 360);
+    gtk_window_set_resizable(dlg, 0);
+    gtk_window_set_modal(dlg, 1);
+    gtk_window_set_transient_for(dlg, parent_win);
+
+    let root = new_box(GTK_ORIENTATION_VERTICAL, 10, &[]);
+    set_margin_all(root, 18);
+
+    let hdr = new_label(title, &["app-heading"]);
+    gtk_label_set_xalign(hdr, 0.0);
+    gtk_box_append(root, hdr);
+
+    let init = editing.clone().unwrap_or(SshHost {
+        port: "22".to_string(),
+        ..Default::default()
+    });
+
+    let mk = |lbl: &str, val: &str, ph_txt: &str| -> (*mut GtkWidget, *mut GtkWidget) {
+        let r = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+        let l = new_label(lbl, &["kv-key"]);
+        gtk_label_set_xalign(l, 0.0);
+        gtk_widget_set_size_request(l, 118, -1);
+        let e = gtk_entry_new();
+        gtk_widget_set_hexpand(e, 1);
+        let ph = cstr(ph_txt);
+        gtk_entry_set_placeholder_text(e, ph.as_ptr());
+        if !val.is_empty() {
+            set_entry_text(e, val);
+        }
+        gtk_box_append(r, l);
+        gtk_box_append(r, e);
+        (r, e)
+    };
+
+    let (r_alias, e_alias) = mk("Host Alias", &init.alias, "e.g. prod-web");
+    let (r_host, e_host) = mk("HostName / IP", &init.hostname, "e.g. 192.168.1.50 or host.id");
+    let (r_user, e_user) = mk("Username", &init.user, "e.g. root or ubuntu");
+    let (r_port, e_port) = mk("Port", &init.port, "22");
+    let (r_key, e_key) = mk("IdentityFile", &init.identity_file, "optional: ~/.ssh/id_ed25519");
+
+    let card = new_box(GTK_ORIENTATION_VERTICAL, 8, &["app-card"]);
+    gtk_box_append(card, r_alias);
+    gtk_box_append(card, r_host);
+    gtk_box_append(card, r_user);
+    gtk_box_append(card, r_port);
+    gtk_box_append(card, r_key);
+    gtk_box_append(root, card);
+
+    let err_lbl = new_label("", &["finder-meta-lbl"]);
+    gtk_label_set_xalign(err_lbl, 0.0);
+    gtk_widget_set_visible(err_lbl, 0);
+    gtk_box_append(root, err_lbl);
+
+    let btns = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    gtk_widget_set_halign(btns, GTK_ALIGN_END);
+    let btn_cancel = new_button("Cancel", &["toolbar-btn"]);
+    let btn_save = new_button(if is_edit { "💾 Save Host" } else { "➕ Add Host" }, &["primary-btn"]);
+    gtk_box_append(btns, btn_cancel);
+    gtk_box_append(btns, btn_save);
+    gtk_box_append(root, btns);
+
+    connect_signal(btn_cancel, "clicked", move || gtk_window_close(dlg));
+
+    let old_alias = editing.map(|h| h.alias);
+    connect_signal(btn_save, "clicked", move || {
+        let alias = get_entry_text(e_alias).trim().to_string();
+        let hostname = get_entry_text(e_host).trim().to_string();
+        if alias.is_empty() || alias.contains(char::is_whitespace) {
+            set_label_text(err_lbl, "❌ Host Alias is required (no spaces).");
+            gtk_widget_set_visible(err_lbl, 1);
+            return;
+        }
+        if hostname.is_empty() {
+            set_label_text(err_lbl, "❌ HostName / IP is required.");
+            gtk_widget_set_visible(err_lbl, 1);
+            return;
+        }
+        let h = SshHost {
+            alias: alias.clone(),
+            hostname,
+            user: get_entry_text(e_user).trim().to_string(),
+            port: {
+                let p = get_entry_text(e_port).trim().to_string();
+                if p.is_empty() { "22".to_string() } else { p }
+            },
+            identity_file: get_entry_text(e_key).trim().to_string(),
+        };
+        let target = old_alias.as_deref().or(Some(alias.as_str()));
+        if update_ssh_config(target, Some(&h)) {
+            (on_saved.borrow())();
+            gtk_window_close(dlg);
+        } else {
+            set_label_text(err_lbl, "❌ Failed to write ~/.ssh/config.");
+            gtk_widget_set_visible(err_lbl, 1);
+        }
+    });
+
+    gtk_window_set_child(dlg, root);
+    gtk_window_present(dlg);
+    gtk_widget_grab_focus(e_alias);
+}
+
 pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBuf>) {
     unsafe {
-        let win = create_app_window(app, "💻  Pancer", 920, 560);
+        let win = create_app_window(app, "💻  Pancer", 1040, 580);
 
         let overlay = gtk_overlay_new();
         let root = new_box(GTK_ORIENTATION_VERTICAL, 0, &[]);
@@ -319,15 +599,27 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         gtk_overlay_set_child(overlay, root);
 
         // ---------------------------------------------------------------------
-        // 1. Pancer Menu Bar (File | Edit | Shell)
+        // 1. Pancer Menu Bar (File | Edit | Shell            [◧ SSH Sidebar])
         // ---------------------------------------------------------------------
         let menubar = new_box(GTK_ORIENTATION_HORIZONTAL, 4, &["pancer-menubar"]);
         let btn_file = new_button("File", &["pancer-menu-btn"]);
         let btn_edit = new_button("Edit", &["pancer-menu-btn"]);
         let btn_shell = new_button("Shell", &["pancer-menu-btn"]);
+        let mb_spacer = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+        gtk_widget_set_hexpand(mb_spacer, 1);
+        let init_sb_vis = load_sidebar_visible();
+        let btn_toggle_sb = new_button(
+            if init_sb_vis { "◧ Hide Sidebar" } else { "◧ SSH Hosts" },
+            &["pancer-sidebar-toggle"],
+        );
+        let tip_sb = cstr("Toggle SSH Hosts Sidebar (Ctrl+Shift+S)");
+        gtk_widget_set_tooltip_text(btn_toggle_sb, tip_sb.as_ptr());
+
         gtk_box_append(menubar, btn_file);
         gtk_box_append(menubar, btn_edit);
         gtk_box_append(menubar, btn_shell);
+        gtk_box_append(menubar, mb_spacer);
+        gtk_box_append(menubar, btn_toggle_sb);
         gtk_box_append(root, menubar);
 
         // Transparent click-outside backdrop placed UNDER the 3 dropdown menus
@@ -396,8 +688,51 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         });
 
         // ---------------------------------------------------------------------
-        // 2. Dynamic Host Tab Bar: | 💻 BijiOS | 🔐 host2 | + |
+        // 2. Main Split Body: [ SSH Hosts Sidebar | Terminal Tabs + Stack ]
         // ---------------------------------------------------------------------
+        let body_hbox = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+        gtk_widget_set_hexpand(body_hbox, 1);
+        gtk_widget_set_vexpand(body_hbox, 1);
+        gtk_box_append(root, body_hbox);
+
+        // Left SSH Hosts Sidebar (~/.ssh/config)
+        let ssh_sidebar = new_box(GTK_ORIENTATION_VERTICAL, 8, &["pancer-sidebar"]);
+        gtk_widget_set_size_request(ssh_sidebar, 228, -1);
+        gtk_widget_set_hexpand(ssh_sidebar, 0);
+        gtk_widget_set_vexpand(ssh_sidebar, 1);
+        gtk_widget_set_visible(ssh_sidebar, if init_sb_vis { 1 } else { 0 });
+
+        let sb_top = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+        let sb_hdr = new_label("🔐 SSH HOSTS", &["pancer-sidebar-hdr"]);
+        gtk_label_set_xalign(sb_hdr, 0.0);
+        gtk_widget_set_hexpand(sb_hdr, 1);
+        let btn_ssh_add = new_button("➕ Add", &["pancer-sidebar-toggle"]);
+        gtk_box_append(sb_top, sb_hdr);
+        gtk_box_append(sb_top, btn_ssh_add);
+        gtk_box_append(ssh_sidebar, sb_top);
+
+        let ssh_filter = gtk_entry_new();
+        add_css(ssh_filter, "pancer-entry");
+        let ph_sf = cstr("🔍 Filter ~/.ssh/config...");
+        gtk_entry_set_placeholder_text(ssh_filter, ph_sf.as_ptr());
+        gtk_box_append(ssh_sidebar, ssh_filter);
+
+        let ssh_scroll = gtk_scrolled_window_new();
+        gtk_scrolled_window_set_policy(ssh_scroll, GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+        gtk_widget_set_vexpand(ssh_scroll, 1);
+        let ssh_list_box = new_box(GTK_ORIENTATION_VERTICAL, 6, &[]);
+        gtk_scrolled_window_set_child(ssh_scroll, ssh_list_box);
+        gtk_box_append(ssh_sidebar, ssh_scroll);
+
+        gtk_box_append(body_hbox, ssh_sidebar);
+
+        // Right Terminal Area (Dynamic Host Tab Bar + Stack)
+        let term_col = new_box(GTK_ORIENTATION_VERTICAL, 0, &[]);
+        gtk_widget_set_hexpand(term_col, 1);
+        gtk_widget_set_vexpand(term_col, 1);
+        gtk_box_append(body_hbox, term_col);
+
+        // Dynamic Host Tab Bar: | 💻 BijiOS | 🔐 host2 | + |
         let tabbar = new_box(GTK_ORIENTATION_HORIZONTAL, 5, &["pancer-tabbar"]);
         let tabs_box = new_box(GTK_ORIENTATION_HORIZONTAL, 4, &[]);
         let btn_add_tab = new_button("+", &["pancer-add-tab"]);
@@ -406,7 +741,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
 
         gtk_box_append(tabbar, tabs_box);
         gtk_box_append(tabbar, btn_add_tab);
-        gtk_box_append(root, tabbar);
+        gtk_box_append(term_col, tabbar);
 
         // ---------------------------------------------------------------------
         // 3. Terminal Tabs Stack & Lifecycle Guard
@@ -414,7 +749,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         let stack = gtk_stack_new();
         gtk_widget_set_hexpand(stack, 1);
         gtk_widget_set_vexpand(stack, 1);
-        gtk_box_append(root, stack);
+        gtk_box_append(term_col, stack);
 
         let alive = Rc::new(Cell::new(true));
         let state = Rc::new(RefCell::new(PancerState {
@@ -789,6 +1124,155 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             })
         };
 
+        let act_toggle_sidebar: Rc<dyn Fn()> = Rc::new(move || {
+            hide_all_menus();
+            let now_vis = gtk_widget_get_visible(ssh_sidebar) != 0;
+            let next_vis = !now_vis;
+            gtk_widget_set_visible(ssh_sidebar, if next_vis { 1 } else { 0 });
+            let lbl = cstr(if next_vis { "◧ Hide Sidebar" } else { "◧ SSH Hosts" });
+            gtk_button_set_label(btn_toggle_sb, lbl.as_ptr());
+            save_sidebar_visible(next_vis);
+        });
+
+        // Populate ~/.ssh/config Host Sidebar (Connect, Edit, Delete)
+        let populate_ssh_hosts: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
+        let pop_ssh_c = Rc::clone(&populate_ssh_hosts);
+        {
+            let at_ssh = Rc::clone(&add_tab);
+            let st_ssh = Rc::clone(&state);
+            let a_ssh = Rc::clone(&alive);
+            *populate_ssh_hosts.borrow_mut() = Box::new(move || {
+                clear_box_children(ssh_list_box);
+                let q = get_entry_text(ssh_filter).trim().to_lowercase();
+                let hosts: Vec<SshHost> = read_ssh_hosts()
+                    .into_iter()
+                    .filter(|h| {
+                        q.is_empty()
+                            || h.alias.to_lowercase().contains(&q)
+                            || h.hostname.to_lowercase().contains(&q)
+                            || h.user.to_lowercase().contains(&q)
+                    })
+                    .collect();
+
+                if hosts.is_empty() {
+                    let empty = new_label(
+                        if q.is_empty() {
+                            "No SSH hosts in ~/.ssh/config.\nClick '➕ Add' to add one."
+                        } else {
+                            "No matching SSH hosts."
+                        },
+                        &["pancer-ssh-meta"],
+                    );
+                    gtk_label_set_xalign(empty, 0.0);
+                    gtk_label_set_wrap(empty, 1);
+                    set_margin_all(empty, 6);
+                    gtk_box_append(ssh_list_box, empty);
+                    return;
+                }
+
+                for h in hosts {
+                    let card = new_box(GTK_ORIENTATION_HORIZONTAL, 4, &["pancer-ssh-card"]);
+                    let conn_btn = gtk_button_new();
+                    add_css(conn_btn, "pancer-ssh-connect");
+                    gtk_widget_set_hexpand(conn_btn, 1);
+
+                    let info = new_box(GTK_ORIENTATION_VERTICAL, 1, &[]);
+                    let al_lbl = new_label(&format!("🔐 {}", h.alias), &["pancer-ssh-alias"]);
+                    gtk_label_set_xalign(al_lbl, 0.0);
+                    gtk_label_set_ellipsize(al_lbl, 3);
+                    let meta_str = if h.user.is_empty() {
+                        format!("{}:{}", h.hostname, h.port)
+                    } else {
+                        format!("{}@{}:{}", h.user, h.hostname, h.port)
+                    };
+                    let m_lbl = new_label(&meta_str, &["pancer-ssh-meta"]);
+                    gtk_label_set_xalign(m_lbl, 0.0);
+                    gtk_label_set_ellipsize(m_lbl, 3);
+                    gtk_box_append(info, al_lbl);
+                    gtk_box_append(info, m_lbl);
+                    gtk_button_set_child(conn_btn, info);
+                    let tip = cstr(&format!("Click to connect: ssh {}", h.alias));
+                    gtk_widget_set_tooltip_text(conn_btn, tip.as_ptr());
+
+                    let btn_edit = new_button("✏️", &["pancer-ssh-act"]);
+                    let tip_e = cstr("Edit SSH Host");
+                    gtk_widget_set_tooltip_text(btn_edit, tip_e.as_ptr());
+                    let btn_del = new_button("🗑️", &["pancer-ssh-act", "pancer-ssh-del"]);
+                    let tip_d = cstr("Delete SSH Host");
+                    gtk_widget_set_tooltip_text(btn_del, tip_d.as_ptr());
+
+                    gtk_box_append(card, conn_btn);
+                    gtk_box_append(card, btn_edit);
+                    gtk_box_append(card, btn_del);
+                    gtk_box_append(ssh_list_box, card);
+
+                    // Click host -> open new tab & auto-run `ssh <alias>`
+                    {
+                        let alias_c = h.alias.clone();
+                        let at = Rc::clone(&at_ssh);
+                        let st = Rc::clone(&st_ssh);
+                        let alv = Rc::clone(&a_ssh);
+                        connect_signal(conn_btn, "clicked", move || {
+                            hide_all_menus();
+                            at(home_dir());
+                            let st2 = Rc::clone(&st);
+                            let alv2 = Rc::clone(&alv);
+                            let cmd_str = format!("ssh {}\n", alias_c);
+                            timeout_add_ms(220, move || {
+                                if alv2.get() {
+                                    let vte_opt = st2
+                                        .try_borrow()
+                                        .ok()
+                                        .and_then(|s| s.active_pane())
+                                        .map(|p| p.vte);
+                                    if let Some(vte) = vte_opt {
+                                        let c = cstr(&cmd_str);
+                                        vte_terminal_feed_child(vte, c.as_ptr(), cmd_str.len() as isize);
+                                        gtk_widget_grab_focus(vte);
+                                    }
+                                }
+                                false
+                            });
+                        });
+                    }
+                    // Edit host
+                    {
+                        let h_edit = h.clone();
+                        let pc = Rc::clone(&pop_ssh_c);
+                        connect_signal(btn_edit, "clicked", move || {
+                            hide_all_menus();
+                            open_ssh_host_dialog(app, win, Some(h_edit.clone()), Rc::clone(&pc));
+                        });
+                    }
+                    // Delete host
+                    {
+                        let alias_del = h.alias.clone();
+                        let pc = Rc::clone(&pop_ssh_c);
+                        connect_signal(btn_del, "clicked", move || {
+                            hide_all_menus();
+                            if update_ssh_config(Some(&alias_del), None) {
+                                (pc.borrow())();
+                            }
+                        });
+                    }
+                }
+            });
+        }
+
+        {
+            let pc = Rc::clone(&populate_ssh_hosts);
+            connect_signal(btn_ssh_add, "clicked", move || {
+                hide_all_menus();
+                open_ssh_host_dialog(app, win, None, Rc::clone(&pc));
+            });
+        }
+        {
+            let pc = Rc::clone(&populate_ssh_hosts);
+            connect_signal(ssh_filter, "changed", move || {
+                (pc.borrow())();
+            });
+        }
+
         // ---------------------------------------------------------------------
         // Populate File / Edit / Shell Dropdown Menu Items (with Hotkeys!)
         // ---------------------------------------------------------------------
@@ -808,6 +1292,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         let mi_dup_tab = new_menu_item("📑", "Duplicate Tab", "Ctrl+Shift+B");
         let mi_split_v = new_menu_item("◫", "Split Vertical", "Ctrl+Shift+D");
         let mi_split_h = new_menu_item("⬓", "Split Horizontal", "Ctrl+Shift+E");
+        let mi_toggle_sb = new_menu_item("◧", "Toggle SSH Sidebar", "Ctrl+Shift+S");
         let mi_close_tab = new_menu_item("✖", "Close Tab", "Ctrl+Shift+W");
 
         gtk_box_append(menu_shell, mi_dup_win);
@@ -816,6 +1301,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         gtk_box_append(menu_shell, mi_split_v);
         gtk_box_append(menu_shell, mi_split_h);
         gtk_box_append(menu_shell, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+        gtk_box_append(menu_shell, mi_toggle_sb);
         gtk_box_append(menu_shell, mi_close_tab);
 
         let wire = |btn: *mut GtkWidget, f: &Rc<dyn Fn()>| {
@@ -831,6 +1317,8 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         wire(mi_dup_tab, &act_dup_tab);
         wire(mi_split_v, &act_split_v);
         wire(mi_split_h, &act_split_h);
+        wire(mi_toggle_sb, &act_toggle_sidebar);
+        wire(btn_toggle_sb, &act_toggle_sidebar);
         wire(mi_close_tab, &act_close_tab);
         wire(btn_add_tab, &act_new_tab);
 
@@ -847,6 +1335,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             let f_dt = Rc::clone(&act_dup_tab);
             let f_sv = Rc::clone(&act_split_v);
             let f_sh = Rc::clone(&act_split_h);
+            let f_sb = Rc::clone(&act_toggle_sidebar);
             let f_ct = Rc::clone(&act_close_tab);
             let st_k = Rc::clone(&state);
             connect_key_pressed(win, move |keyval, mods| {
@@ -875,11 +1364,14 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                     Some('B') => { f_dt(); true }
                     Some('D') => { f_sv(); true }
                     Some('E') => { f_sh(); true }
+                    Some('S') => { f_sb(); true }
                     Some('W') => { f_ct(); true }
                     _ => false,
                 }
             });
         }
+
+        (populate_ssh_hosts.borrow())();
 
         // Dynamic Host Detection Timer (safe against window destroy — never touches freed win!)
         {
