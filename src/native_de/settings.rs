@@ -516,12 +516,39 @@ unsafe fn build_dock_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
     gtk_label_set_xalign(hdr, 0.0);
     gtk_box_append(dock_card, hdr);
 
-    // 1. Dock Size
+    // 0. Hide / Unhide Dock
+    let hide_row = new_box(GTK_ORIENTATION_HORIZONTAL, 12, &[]);
+    let hide_lbl = new_label("Hide Dock", &["finder-name-btn"]);
+    gtk_label_set_xalign(hide_lbl, 0.0);
+    gtk_widget_set_hexpand(hide_lbl, 1);
+    let hide_state_lbl = new_label(
+        if cur.dock_hidden { "Hidden" } else { "Visible" },
+        &["app-muted"],
+    );
+    let hide_switch = gtk_switch_new();
+    gtk_widget_set_valign(hide_switch, GTK_ALIGN_CENTER);
+    gtk_switch_set_active(hide_switch, if cur.dock_hidden { 1 } else { 0 });
+    gtk_box_append(hide_row, hide_lbl);
+    gtk_box_append(hide_row, hide_state_lbl);
+    gtk_box_append(hide_row, hide_switch);
+    gtk_box_append(dock_card, hide_row);
+
+    {
+        let h = Rc::clone(&handles);
+        connect_notify(hide_switch, "notify::active", move || {
+            let hidden = gtk_switch_get_active(hide_switch) != 0;
+            set_label_text(hide_state_lbl, if hidden { "Hidden" } else { "Visible" });
+            h.settings.borrow_mut().dock_hidden = hidden;
+            apply_desktop_settings(&h);
+        });
+    }
+
+    // 1. Dock Size (15px - 64px)
     let sz_row = new_box(GTK_ORIENTATION_HORIZONTAL, 12, &[]);
     let sz_lbl = new_label("Dock Size", &["finder-name-btn"]);
     gtk_label_set_xalign(sz_lbl, 0.0);
     gtk_widget_set_size_request(sz_lbl, 200, -1);
-    let sz_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 32.0, 64.0, 2.0);
+    let sz_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 15.0, 64.0, 1.0);
     gtk_widget_set_hexpand(sz_scale, 1);
     gtk_range_set_value(sz_scale, cur.dock_size as f64);
     let sz_val = new_label(&format!("{} px", cur.dock_size), &["app-muted"]);

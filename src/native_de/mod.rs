@@ -135,6 +135,7 @@ pub fn get_minimize_effect() -> &'static str {
 #[derive(Clone)]
 pub struct DesktopSettings {
     pub dock_size: i32,
+    pub dock_hidden: bool,
     pub magnification_enabled: bool,
     pub magnification: f64,
     pub dock_position: String,   // "bottom", "left", "right"
@@ -149,6 +150,7 @@ impl Default for DesktopSettings {
     fn default() -> Self {
         Self {
             dock_size: 40,
+            dock_hidden: false,
             magnification_enabled: true,
             magnification: 1.25,
             dock_position: "bottom".to_string(),
@@ -221,9 +223,10 @@ impl DesktopSettings {
                     match k.trim() {
                         "dock_size" => {
                             if let Ok(n) = v.parse::<i32>() {
-                                s.dock_size = n.clamp(32, 64);
+                                s.dock_size = n.clamp(15, 64);
                             }
                         }
+                        "dock_hidden" => s.dock_hidden = v == "true",
                         "magnification_enabled" => s.magnification_enabled = v == "true",
                         "magnification" => {
                             if let Ok(f) = v.parse::<f64>() {
@@ -260,8 +263,9 @@ impl DesktopSettings {
             let _ = fs::create_dir_all(parent);
         }
         let body = format!(
-            "dock_size={}\nmagnification_enabled={}\nmagnification={:.2}\ndock_position={}\nminimize_effect={}\nanimate_opening={}\nwallpaper={}\ndynamic_phase={}\nuser_avatar={}\n",
+            "dock_size={}\ndock_hidden={}\nmagnification_enabled={}\nmagnification={:.2}\ndock_position={}\nminimize_effect={}\nanimate_opening={}\nwallpaper={}\ndynamic_phase={}\nuser_avatar={}\n",
             self.dock_size,
+            self.dock_hidden,
             self.magnification_enabled,
             self.magnification,
             self.dock_position,
@@ -340,10 +344,12 @@ pub unsafe fn apply_desktop_settings(handles: &DesktopHandles) {
         String::new()
     };
 
-    // 2. Apply Dock Size & Magnification via live user CSS provider
-    let sz = s.dock_size.clamp(32, 64);
-    let font_sz = ((sz as f64) * 0.48).round() as i32;
-    let radius = ((sz as f64) * 0.28).round() as i32;
+    // 2. Apply Dock Size (down to 15px) & Magnification via live user CSS provider
+    let sz = s.dock_size.clamp(15, 64);
+    let font_sz = ((sz as f64) * 0.52).round().max(8.0) as i32;
+    let radius = ((sz as f64) * 0.28).round().max(4.0) as i32;
+    let dock_pad = if sz <= 20 { 3 } else if sz <= 28 { 5 } else { 7 };
+    let dock_rad = (radius + 6).min(18);
     let hover_rule = if s.magnification_enabled && s.magnification > 1.01 {
         let (tx, ty) = match s.dock_position.as_str() {
             "left" => (6, 0),
@@ -365,13 +371,14 @@ pub unsafe fn apply_desktop_settings(handles: &DesktopHandles) {
     };
 
     let css_str = format!(
-        "{}\nbutton.dock-btn {{ min-width: {}px; min-height: {}px; font-size: {}px; border-radius: {}px; transition: all 140ms ease; }}\n{}\n{}\n",
-        wp_css, sz, sz, font_sz, radius, hover_rule, bounce_rule
+        "{}\n.floating-dock {{ padding: {}px; border-radius: {}px; }}\nbutton.dock-btn {{ min-width: {}px; min-height: {}px; padding: 0px; font-size: {}px; border-radius: {}px; transition: all 140ms ease; }}\n{}\n{}\n",
+        wp_css, dock_pad, dock_rad, sz, sz, font_sz, radius, hover_rule, bounce_rule
     );
     let c_css = cstr(&css_str);
     gtk_css_provider_load_from_string(handles.dynamic_css, c_css.as_ptr());
 
-    // 3. Apply Dock Position (Bottom / Left / Right) live — ref before remove so GTK4 never frees dock_wrap!
+    // 3. Apply Dock Visibility (Hide / Unhide) & Position (Bottom / Left / Right) live
+    gtk_widget_set_visible(handles.dock_wrap, if s.dock_hidden { 0 } else { 1 });
     let parent = gtk_widget_get_parent(handles.dock_wrap);
     g_object_ref(handles.dock_wrap as GPointer);
     if parent == handles.root_vbox {
