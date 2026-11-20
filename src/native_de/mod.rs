@@ -50,7 +50,7 @@ fn now_short_clock() -> String {
 }
 
 /// Authenticate user credentials via local BijiOS PAM daemon (127.0.0.1:3000)
-fn authenticate_via_daemon(username: &str, password: &str) -> bool {
+pub fn authenticate_via_daemon(username: &str, password: &str) -> bool {
     let try_once = |u: &str, p: &str| -> bool {
         let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
         let addr = format!("127.0.0.1:{}", port);

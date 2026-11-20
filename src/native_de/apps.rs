@@ -1806,26 +1806,14 @@ pub fn open_bibit(app: *mut GtkApplication) {
                 let pop_act = Rc::clone(&pop_clone);
                 connect_signal(act_btn, "clicked", move || {
                     let action = if installed { "remove" } else { "install" };
-                    set_label_text(
+                    open_bibit_auth_and_run(
+                        app,
+                        win,
+                        pkg_name.clone(),
+                        action.to_string(),
                         status_left,
-                        &format!("Running APT {} for '{}' (authentication may be requested)...", action, pkg_name),
+                        Rc::clone(&pop_act),
                     );
-                    let pkg_bg = pkg_name.clone();
-                    let act_bg = action.to_string();
-                    std::thread::spawn(move || {
-                        let _ = Command::new("pkexec")
-                            .args(["apt-get", &act_bg, "-y", &pkg_bg])
-                            .stdin(Stdio::null())
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .status();
-                        let _ = Command::new("/usr/bin/bijios-app-sync")
-                            .stdin(Stdio::null())
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .status();
-                    });
-                    let _ = &pop_act;
                 });
             }
         });
@@ -1895,6 +1883,209 @@ pub fn open_bibit(app: *mut GtkApplication) {
         (populate.borrow())();
         gtk_window_present(win);
     }
+}
+
+/// Native GTK4 Administrator Authentication Modal + Background APT Runner for Bibit Store
+unsafe fn open_bibit_auth_and_run(
+    app: *mut GtkApplication,
+    parent_win: *mut GtkWidget,
+    pkg_name: String,
+    action: String,
+    status_left: *mut GtkWidget,
+    refresh_list: Rc<RefCell<Box<dyn Fn()>>>,
+) {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    let dlg = create_app_window(app, "🔒 Administrator Authentication", 440, 270);
+    gtk_window_set_resizable(dlg, 0);
+    gtk_window_set_modal(dlg, 1);
+    gtk_window_set_transient_for(dlg, parent_win);
+
+    let root = new_box(GTK_ORIENTATION_VERTICAL, 12, &[]);
+    set_margin_all(root, 20);
+
+    let verb = if action == "remove" { "Remove" } else { "Install" };
+    let hdr = new_label(&format!("🔒 {} '{}' via APT", verb, pkg_name), &["app-heading"]);
+    gtk_label_set_xalign(hdr, 0.0);
+
+    let user = std::env::var("USER").unwrap_or_else(|_| "dionipe".to_string());
+    let sub = new_label(
+        &format!(
+            "Administrator privileges (sudo/root) are required to {} Debian packages.\nEnter password for '{}':",
+            action, user
+        ),
+        &["app-muted"],
+    );
+    gtk_label_set_xalign(sub, 0.0);
+    gtk_label_set_wrap(sub, 1);
+
+    let pw_entry = gtk_entry_new();
+    let ph = cstr("Enter sudo / login password");
+    gtk_entry_set_placeholder_text(pw_entry, ph.as_ptr());
+    gtk_entry_set_visibility(pw_entry, 0);
+
+    let err_lbl = new_label("", &["finder-meta-lbl"]);
+    gtk_label_set_xalign(err_lbl, 0.0);
+    gtk_widget_set_visible(err_lbl, 0);
+
+    let btn_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    gtk_widget_set_halign(btn_row, GTK_ALIGN_END);
+    let btn_cancel = new_button("Cancel", &["toolbar-btn"]);
+    let btn_auth = new_button(&format!("🔓 Authenticate & {}", verb), &["primary-btn"]);
+    gtk_box_append(btn_row, btn_cancel);
+    gtk_box_append(btn_row, btn_auth);
+
+    gtk_box_append(root, hdr);
+    gtk_box_append(root, sub);
+    gtk_box_append(root, pw_entry);
+    gtk_box_append(root, err_lbl);
+    gtk_box_append(root, btn_row);
+
+    connect_signal(btn_cancel, "clicked", move || {
+        gtk_window_close(dlg);
+    });
+
+    let do_auth: Rc<dyn Fn()> = {
+        let user_c = user.clone();
+        let pkg_c = pkg_name.clone();
+        let act_c = action.clone();
+        let rf_c = Rc::clone(&refresh_list);
+        Rc::new(move || {
+            let pw = get_entry_text(pw_entry);
+            if pw.is_empty() {
+                set_label_text(err_lbl, "❌ Password cannot be empty.");
+                gtk_widget_set_visible(err_lbl, 1);
+                return;
+            }
+            if !crate::native_de::authenticate_via_daemon(&user_c, &pw) {
+                set_label_text(err_lbl, "❌ Incorrect password. Please try again.");
+                gtk_widget_set_visible(err_lbl, 1);
+                set_entry_text(pw_entry, "");
+                gtk_widget_grab_focus(pw_entry);
+                return;
+            }
+
+            gtk_window_close(dlg);
+
+            let gerund = if act_c == "remove" { "Removing" } else { "Installing" };
+            set_label_text(
+                status_left,
+                &format!("⏳ {} '{}' via APT (please wait)...", gerund, pkg_c),
+            );
+
+            // Track background APT completion safely
+            let result_state: Arc<Mutex<Option<(bool, String)>>> = Arc::new(Mutex::new(None));
+            let res_bg = Arc::clone(&result_state);
+            let pkg_bg = pkg_c.clone();
+            let act_bg = act_c.clone();
+            let pw_bg = pw;
+
+            std::thread::spawn(move || {
+                let mut child = match Command::new("sudo")
+                    .args([
+                        "-S",
+                        "env",
+                        "DEBIAN_FRONTEND=noninteractive",
+                        "apt-get",
+                        &act_bg,
+                        "-y",
+                        &pkg_bg,
+                    ])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        if let Ok(mut g) = res_bg.lock() {
+                            *g = Some((false, format!("Failed to spawn sudo: {}", e)));
+                        }
+                        return;
+                    }
+                };
+
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = writeln!(stdin, "{}", pw_bg);
+                }
+
+                let out = child.wait_with_output();
+                let (ok, detail) = match out {
+                    Ok(o) if o.status.success() => {
+                        let _ = Command::new("/usr/bin/bijios-app-sync")
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .status();
+                        (true, String::new())
+                    }
+                    Ok(o) => {
+                        let err_txt = String::from_utf8_lossy(&o.stderr);
+                        let last = err_txt
+                            .lines()
+                            .rev()
+                            .find(|l| !l.trim().is_empty() && !l.contains("[sudo]"))
+                            .unwrap_or("APT returned non-zero exit code")
+                            .trim()
+                            .to_string();
+                        (false, last)
+                    }
+                    Err(e) => (false, e.to_string()),
+                };
+
+                if let Ok(mut g) = res_bg.lock() {
+                    *g = Some((ok, detail));
+                }
+            });
+
+            // Poll completion on GTK main thread (destroy-safe)
+            let parent_alive = Rc::new(std::cell::Cell::new(true));
+            {
+                let pa = Rc::clone(&parent_alive);
+                connect_signal(parent_win, "destroy", move || pa.set(false));
+            }
+            let rf_poll = Rc::clone(&rf_c);
+            let pkg_done = pkg_c.clone();
+            let act_done = act_c.clone();
+            timeout_add_ms(400, move || {
+                if !parent_alive.get() {
+                    return false;
+                }
+                let finished = result_state.lock().ok().and_then(|g| g.clone());
+                if let Some((ok, detail)) = finished {
+                    if ok {
+                        let past = if act_done == "remove" { "removed" } else { "installed" };
+                        (rf_poll.borrow())();
+                        set_label_text(
+                            status_left,
+                            &format!("✅ Successfully {} '{}'!", past, pkg_done),
+                        );
+                    } else {
+                        set_label_text(
+                            status_left,
+                            &format!("❌ APT {} failed for '{}': {}", act_done, pkg_done, detail),
+                        );
+                    }
+                    return false;
+                }
+                true
+            });
+        })
+    };
+
+    {
+        let da = Rc::clone(&do_auth);
+        connect_signal(btn_auth, "clicked", move || da());
+    }
+    {
+        let da = Rc::clone(&do_auth);
+        connect_signal(pw_entry, "activate", move || da());
+    }
+
+    gtk_window_set_child(dlg, root);
+    gtk_window_present(dlg);
+    gtk_widget_grab_focus(pw_entry);
 }
 
 // ============================================================================
