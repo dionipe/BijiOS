@@ -19,6 +19,7 @@ pub struct NativeDesktopApp {
     pub exec: String,
     pub comment: String,
     pub icon: String,
+    pub icon_name: String,
 }
 
 pub fn scan_installed_deb_apps() -> Vec<NativeDesktopApp> {
@@ -45,6 +46,7 @@ pub fn scan_installed_deb_apps() -> Vec<NativeDesktopApp> {
             let mut exec = String::new();
             let mut comment = String::new();
             let mut categories = String::new();
+            let mut icon_name = String::new();
             let mut no_display = false;
             let mut hidden = false;
 
@@ -64,6 +66,7 @@ pub fn scan_installed_deb_apps() -> Vec<NativeDesktopApp> {
                         "Exec" => exec = v.trim().to_string(),
                         "Comment" if comment.is_empty() => comment = v.trim().to_string(),
                         "Categories" => categories = v.trim().to_string(),
+                        "Icon" if icon_name.is_empty() => icon_name = v.trim().to_string(),
                         "NoDisplay" => no_display = v.trim().eq_ignore_ascii_case("true"),
                         "Hidden" => hidden = v.trim().eq_ignore_ascii_case("true"),
                         _ => {}
@@ -109,6 +112,7 @@ pub fn scan_installed_deb_apps() -> Vec<NativeDesktopApp> {
                     exec,
                     comment,
                     icon: icon.to_string(),
+                    icon_name,
                 },
             );
         }
@@ -657,7 +661,13 @@ pub fn open_launchpad(
                         "🎵" => "icon-notes",
                         _ => "icon-gridcraft",
                     };
-                    let btn = new_icon_tile_button(&da.icon, icon_cls, &short_name, &["launchpad-tile"]);
+                    let btn = new_deb_icon_tile_button(
+                        &da.icon_name,
+                        &da.icon,
+                        icon_cls,
+                        &short_name,
+                        &["launchpad-tile"],
+                    );
                     let tip = cstr(&format!("{} ({})", da.name, da.comment));
                     gtk_widget_set_tooltip_text(btn, tip.as_ptr());
                     gtk_flow_box_append(flow, btn);

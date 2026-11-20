@@ -131,9 +131,12 @@ extern "C" {
     pub fn gtk_window_handle_new() -> *mut GtkWidget;
     pub fn gtk_window_handle_set_child(handle: *mut GtkWidget, child: *mut GtkWidget);
 
-    // GtkImage & GtkPicture
+    // GtkImage, GtkIconTheme & GtkPicture
     pub fn gtk_image_new_from_file(filename: *const c_char) -> *mut GtkWidget;
+    pub fn gtk_image_new_from_icon_name(icon_name: *const c_char) -> *mut GtkWidget;
     pub fn gtk_image_set_pixel_size(image: *mut GtkWidget, pixel_size: c_int);
+    pub fn gtk_icon_theme_get_for_display(display: *mut GdkDisplay) -> GPointer;
+    pub fn gtk_icon_theme_has_icon(icon_theme: GPointer, icon_name: *const c_char) -> c_int;
     pub fn gtk_picture_new_for_filename(filename: *const c_char) -> *mut GtkWidget;
     pub fn gtk_picture_set_content_fit(picture: *mut GtkWidget, content_fit: c_int);
 
@@ -648,6 +651,98 @@ pub unsafe fn new_icon_tile_button(
     gtk_widget_set_halign(lbl, GTK_ALIGN_CENTER);
 
     gtk_box_append(col, badge);
+    gtk_box_append(col, lbl);
+    gtk_button_set_child(btn, col);
+    btn
+}
+
+/// Resolve a Freedesktop `.desktop` Icon= entry (absolute path, hicolor/pixmaps, or GtkIconTheme)
+pub fn resolve_desktop_icon_file(icon_name: &str) -> Option<String> {
+    let trimmed = icon_name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let p = std::path::Path::new(trimmed);
+    if p.is_absolute() && p.is_file() {
+        return Some(trimmed.to_string());
+    }
+    let stem = trimmed
+        .strip_suffix(".png")
+        .or_else(|| trimmed.strip_suffix(".svg"))
+        .or_else(|| trimmed.strip_suffix(".xpm"))
+        .unwrap_or(trimmed);
+
+    let candidates = [
+        format!("/usr/share/icons/hicolor/scalable/apps/{}.svg", stem),
+        format!("/usr/share/icons/hicolor/256x256/apps/{}.png", stem),
+        format!("/usr/share/icons/hicolor/128x128/apps/{}.png", stem),
+        format!("/usr/share/icons/hicolor/96x96/apps/{}.png", stem),
+        format!("/usr/share/icons/hicolor/64x64/apps/{}.png", stem),
+        format!("/usr/share/icons/hicolor/48x48/apps/{}.png", stem),
+        format!("/usr/share/pixmaps/{}.svg", stem),
+        format!("/usr/share/pixmaps/{}.png", stem),
+        format!("/usr/share/pixmaps/{}.xpm", stem),
+        format!("/usr/share/icons/{}.svg", stem),
+        format!("/usr/share/icons/{}.png", stem),
+    ];
+    for c in candidates {
+        if std::path::Path::new(&c).is_file() {
+            return Some(c);
+        }
+    }
+    None
+}
+
+/// Launchpad tile for installed `.deb` apps using their real native Freedesktop icon
+pub unsafe fn new_deb_icon_tile_button(
+    icon_name: &str,
+    fallback_emoji: &str,
+    fallback_css: &str,
+    label: &str,
+    tile_css: &[&str],
+) -> *mut GtkWidget {
+    let btn = gtk_button_new();
+    for cls in tile_css {
+        add_css(btn, cls);
+    }
+    let col = new_box(GTK_ORIENTATION_VERTICAL, 8, &[]);
+    gtk_widget_set_halign(col, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(col, GTK_ALIGN_CENTER);
+
+    let icon_widget: *mut GtkWidget = if let Some(file_path) = resolve_desktop_icon_file(icon_name) {
+        let c = cstr(&file_path);
+        let img = gtk_image_new_from_file(c.as_ptr());
+        gtk_image_set_pixel_size(img, 52);
+        gtk_widget_set_halign(img, GTK_ALIGN_CENTER);
+        img
+    } else if !icon_name.trim().is_empty() {
+        let display = gdk_display_get_default();
+        let theme = if !display.is_null() {
+            gtk_icon_theme_get_for_display(display)
+        } else {
+            std::ptr::null_mut()
+        };
+        let c_name = cstr(icon_name.trim());
+        if !theme.is_null() && gtk_icon_theme_has_icon(theme, c_name.as_ptr()) != 0 {
+            let img = gtk_image_new_from_icon_name(c_name.as_ptr());
+            gtk_image_set_pixel_size(img, 52);
+            gtk_widget_set_halign(img, GTK_ALIGN_CENTER);
+            img
+        } else {
+            let badge = new_label(fallback_emoji, &["launchpad-icon-badge", fallback_css]);
+            gtk_widget_set_halign(badge, GTK_ALIGN_CENTER);
+            badge
+        }
+    } else {
+        let badge = new_label(fallback_emoji, &["launchpad-icon-badge", fallback_css]);
+        gtk_widget_set_halign(badge, GTK_ALIGN_CENTER);
+        badge
+    };
+
+    let lbl = new_label(label, &["launchpad-caption"]);
+    gtk_widget_set_halign(lbl, GTK_ALIGN_CENTER);
+
+    gtk_box_append(col, icon_widget);
     gtk_box_append(col, lbl);
     gtk_button_set_child(btn, col);
     btn
