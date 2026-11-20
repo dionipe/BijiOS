@@ -411,19 +411,38 @@ button.dock-btn:hover {
    ------------------------------------------------------------------------- */
 window.app-window {
     background-image: none;
-    background-color: #FFFFFF;
+    background-color: #102B23;
     color: #12332A;
-    border: 1px solid rgba(18, 51, 42, 0.24);
+    border: 2px solid #0B1F19;
     border-radius: 14px;
-    margin: 10px;
-    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.30);
+    padding: 3px 4px 4px 4px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+}
+
+window.app-window > box,
+window.app-window > overlay,
+window.app-window > scrolledwindow {
+    background-color: #FFFFFF;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
 }
 
 window.app-window.maximized,
 window.app-window.fullscreen {
-    margin: 0px;
+    border: none;
+    padding: 0px;
     border-radius: 0px;
     box-shadow: none;
+}
+
+window.app-window.maximized > box,
+window.app-window.maximized > overlay,
+window.app-window.maximized > scrolledwindow,
+window.app-window.fullscreen > box,
+window.app-window.fullscreen > overlay,
+window.app-window.fullscreen > scrolledwindow {
+    border-bottom-left-radius: 0px;
+    border-bottom-right-radius: 0px;
 }
 
 window.app-window.maximized .mac-titlebar,
