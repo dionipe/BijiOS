@@ -156,6 +156,7 @@ extern "C" {
     pub fn gtk_widget_has_focus(widget: *mut GtkWidget) -> c_int;
     pub fn gtk_widget_set_sensitive(widget: *mut GtkWidget, sensitive: c_int);
     pub fn gtk_widget_set_opacity(widget: *mut GtkWidget, opacity: c_double);
+    pub fn gtk_widget_set_overflow(widget: *mut GtkWidget, overflow: c_int);
     pub fn gtk_widget_get_parent(widget: *mut GtkWidget) -> *mut GtkWidget;
 
     // GtkOrientable (switch Dock between horizontal & vertical live)
@@ -485,6 +486,62 @@ pub unsafe fn new_link_button(label: &str, url: &str, css: &[&str]) -> *mut GtkW
             .spawn();
     });
     btn
+}
+
+/// Circular User Profile Avatar widget:
+/// - `file:<path>` -> custom circular photo clipped with GTK_OVERFLOW_HIDDEN
+/// - `preset:<emoji>:<grad_css>` -> curated gradient circular icon
+/// - `initial` (or fallback) -> Hijau Tunas gradient circle with uppercase initial
+pub unsafe fn new_user_avatar_widget(avatar: &str, username: &str, size: i32) -> *mut GtkWidget {
+    if let Some(path) = avatar.strip_prefix("file:") {
+        if !path.is_empty() && std::path::Path::new(path).exists() {
+            let frame = new_box(GTK_ORIENTATION_VERTICAL, 0, &["avatar-photo-frame"]);
+            gtk_widget_set_size_request(frame, size, size);
+            gtk_widget_set_halign(frame, GTK_ALIGN_CENTER);
+            gtk_widget_set_valign(frame, GTK_ALIGN_CENTER);
+            gtk_widget_set_overflow(frame, 1); // GTK_OVERFLOW_HIDDEN (clips to 999px circle)
+
+            let c = cstr(path);
+            let pic = gtk_picture_new_for_filename(c.as_ptr());
+            gtk_picture_set_content_fit(pic, 2); // GTK_CONTENT_FIT_COVER
+            gtk_widget_set_size_request(pic, size, size);
+            gtk_widget_set_hexpand(pic, 1);
+            gtk_widget_set_vexpand(pic, 1);
+            gtk_box_append(frame, pic);
+            return frame;
+        }
+    }
+
+    let size_css = if size <= 24 {
+        "avatar-circle-sm"
+    } else if size <= 60 {
+        "avatar-circle-md"
+    } else {
+        "avatar-circle-lg"
+    };
+
+    if let Some(rest) = avatar.strip_prefix("preset:") {
+        let parts: Vec<&str> = rest.split(':').collect();
+        if parts.len() == 2 {
+            let lbl = new_label(parts[0], &[size_css, parts[1]]);
+            gtk_widget_set_size_request(lbl, size, size);
+            gtk_widget_set_halign(lbl, GTK_ALIGN_CENTER);
+            gtk_widget_set_valign(lbl, GTK_ALIGN_CENTER);
+            return lbl;
+        }
+    }
+
+    let init_ch = username
+        .chars()
+        .next()
+        .unwrap_or('U')
+        .to_uppercase()
+        .to_string();
+    let lbl = new_label(&init_ch, &[size_css, "avatar-grad-green"]);
+    gtk_widget_set_size_request(lbl, size, size);
+    gtk_widget_set_halign(lbl, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(lbl, GTK_ALIGN_CENTER);
+    lbl
 }
 
 /// Official BijiOS SVG Logo widget (Golden Seed + Hijau Tunas & Hijau Muda leaves)

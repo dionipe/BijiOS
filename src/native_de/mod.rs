@@ -129,6 +129,7 @@ pub struct DesktopSettings {
     pub animate_opening: bool,
     pub wallpaper: String,       // "dynamic-padi" or "<name>.svg"
     pub dynamic_phase: String,   // "auto", "dawn", "day", "sunset", "night"
+    pub user_avatar: String,     // "initial", "preset:<emoji>:<grad>", or "file:<path>"
 }
 
 impl Default for DesktopSettings {
@@ -142,6 +143,7 @@ impl Default for DesktopSettings {
             animate_opening: true,
             wallpaper: "dynamic-padi".to_string(),
             dynamic_phase: "auto".to_string(),
+            user_avatar: "initial".to_string(),
         }
     }
 }
@@ -228,6 +230,9 @@ impl DesktopSettings {
                         "dynamic_phase" if matches!(v, "auto" | "dawn" | "day" | "sunset" | "night") => {
                             s.dynamic_phase = v.to_string();
                         }
+                        "user_avatar" if !v.is_empty() => {
+                            s.user_avatar = v.to_string();
+                        }
                         _ => {}
                     }
                 }
@@ -242,7 +247,7 @@ impl DesktopSettings {
             let _ = fs::create_dir_all(parent);
         }
         let body = format!(
-            "dock_size={}\nmagnification_enabled={}\nmagnification={:.2}\ndock_position={}\nminimize_effect={}\nanimate_opening={}\nwallpaper={}\ndynamic_phase={}\n",
+            "dock_size={}\nmagnification_enabled={}\nmagnification={:.2}\ndock_position={}\nminimize_effect={}\nanimate_opening={}\nwallpaper={}\ndynamic_phase={}\nuser_avatar={}\n",
             self.dock_size,
             self.magnification_enabled,
             self.magnification,
@@ -250,7 +255,8 @@ impl DesktopSettings {
             self.minimize_effect,
             self.animate_opening,
             self.wallpaper,
-            self.dynamic_phase
+            self.dynamic_phase,
+            self.user_avatar
         );
         let _ = fs::write(path, body);
     }
@@ -262,8 +268,42 @@ pub struct DesktopHandles {
     pub body_hbox: *mut GtkWidget,
     pub dock_wrap: *mut GtkWidget,
     pub dock_box: *mut GtkWidget,
+    pub menubar_avatar_slot: *mut GtkWidget,
+    pub login_avatar_slot: Rc<RefCell<*mut GtkWidget>>,
+    pub active_user: Rc<RefCell<String>>,
     pub dynamic_css: *mut GtkCssProvider,
     pub settings: Rc<RefCell<DesktopSettings>>,
+}
+
+pub unsafe fn refresh_user_avatars(handles: &DesktopHandles) {
+    let av = handles.settings.borrow().user_avatar.clone();
+    let user = handles.active_user.borrow().clone();
+
+    if !handles.menubar_avatar_slot.is_null() {
+        clear_box_children(handles.menubar_avatar_slot);
+        gtk_box_append(
+            handles.menubar_avatar_slot,
+            new_user_avatar_widget(&av, &user, 18),
+        );
+    }
+
+    let login_slot = *handles.login_avatar_slot.borrow();
+    if !login_slot.is_null() {
+        clear_box_children(login_slot);
+        if av == "initial" {
+            let logo_img = new_logo_image(54, false);
+            gtk_widget_set_halign(logo_img, GTK_ALIGN_CENTER);
+            gtk_widget_set_valign(logo_img, GTK_ALIGN_CENTER);
+            gtk_widget_set_hexpand(logo_img, 1);
+            gtk_box_append(login_slot, logo_img);
+        } else {
+            let av_w = new_user_avatar_widget(&av, &user, 76);
+            gtk_widget_set_halign(av_w, GTK_ALIGN_CENTER);
+            gtk_widget_set_valign(av_w, GTK_ALIGN_CENTER);
+            gtk_widget_set_hexpand(av_w, 1);
+            gtk_box_append(login_slot, av_w);
+        }
+    }
 }
 
 pub unsafe fn apply_desktop_settings(handles: &DesktopHandles) {
@@ -351,6 +391,9 @@ pub unsafe fn apply_desktop_settings(handles: &DesktopHandles) {
         }
     }
     g_object_unref(handles.dock_wrap as GPointer);
+
+    // 4. Refresh User Profile Avatars across Top Menu Bar & Login Screen
+    refresh_user_avatars(handles);
 }
 
 unsafe fn load_bijios_css() -> *mut GtkCssProvider {
@@ -379,6 +422,7 @@ unsafe fn build_desktop_shell(
     app: *mut GtkApplication,
     active_user: Rc<RefCell<String>>,
     login_win_holder: Rc<RefCell<*mut GtkWidget>>,
+    login_avatar_slot: Rc<RefCell<*mut GtkWidget>>,
     dynamic_css: *mut GtkCssProvider,
 ) -> *mut GtkWidget {
     let win = gtk_application_window_new(app);
@@ -416,12 +460,19 @@ unsafe fn build_desktop_shell(
     let dock = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &["bijios-dock"]);
     gtk_box_append(dock_wrap, dock);
 
+    // Top Menu Bar live user avatar slot
+    let menubar_avatar_slot = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+    gtk_widget_set_valign(menubar_avatar_slot, GTK_ALIGN_CENTER);
+
     let handles = Rc::new(DesktopHandles {
         desktop_win: win,
         root_vbox: root,
         body_hbox,
         dock_wrap,
         dock_box: dock,
+        menubar_avatar_slot,
+        login_avatar_slot,
+        active_user: Rc::clone(&active_user),
         dynamic_css,
         settings: Rc::new(RefCell::new(DesktopSettings::load())),
     });
@@ -564,11 +615,14 @@ unsafe fn build_desktop_shell(
     gtk_box_append(left_box, btn_pancer_top);
     gtk_box_append(left_box, btn_settings_top);
 
-    // Right status indicators
+    // Right status indicators (with live User Profile Avatar pill)
     let right_box = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
     let hostname = fs::read_to_string("/etc/hostname").unwrap_or_else(|_| "BijiOS".into());
     let host_pill = new_label(&format!("🖥️ {}", hostname.trim()), &["menubar-pill"]);
-    let user_pill = new_label(&format!("👤 {}", active_user.borrow()), &["menubar-pill"]);
+    let user_pill = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &["menubar-pill"]);
+    let user_name_lbl = new_label(&active_user.borrow(), &[]);
+    gtk_box_append(user_pill, menubar_avatar_slot);
+    gtk_box_append(user_pill, user_name_lbl);
     let top_clock = new_label(&now_short_clock(), &["menubar-clock"]);
     gtk_box_append(right_box, host_pill);
     gtk_box_append(right_box, user_pill);
@@ -773,6 +827,7 @@ unsafe fn build_login_screen(
     app: *mut GtkApplication,
     desktop_win: *mut GtkWidget,
     active_user: Rc<RefCell<String>>,
+    login_avatar_slot: Rc<RefCell<*mut GtkWidget>>,
 ) -> *mut GtkWidget {
     let win = gtk_application_window_new(app);
     let title = cstr("BijiOS Login");
@@ -815,11 +870,21 @@ unsafe fn build_login_screen(
 
     let avatar_ring = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &["login-avatar-ring"]);
     gtk_widget_set_halign(avatar_ring, GTK_ALIGN_CENTER);
-    let logo_img = new_logo_image(54, false);
-    gtk_widget_set_halign(logo_img, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(logo_img, GTK_ALIGN_CENTER);
-    gtk_widget_set_hexpand(logo_img, 1);
-    gtk_box_append(avatar_ring, logo_img);
+    *login_avatar_slot.borrow_mut() = avatar_ring;
+    let init_settings = DesktopSettings::load();
+    if init_settings.user_avatar == "initial" {
+        let logo_img = new_logo_image(54, false);
+        gtk_widget_set_halign(logo_img, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(logo_img, GTK_ALIGN_CENTER);
+        gtk_widget_set_hexpand(logo_img, 1);
+        gtk_box_append(avatar_ring, logo_img);
+    } else {
+        let av_w = new_user_avatar_widget(&init_settings.user_avatar, &active_user.borrow(), 76);
+        gtk_widget_set_halign(av_w, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(av_w, GTK_ALIGN_CENTER);
+        gtk_widget_set_hexpand(av_w, 1);
+        gtk_box_append(avatar_ring, av_w);
+    }
 
     let title_lbl = new_label("Sign In to BijiOS", &["login-title"]);
     let badge_lbl = new_label("Version 1.0.0 (Padi)  •  Sovereign Workspace", &["login-badge"]);
@@ -939,14 +1004,21 @@ extern "C" fn on_activate(app: *mut GtkApplication, _user_data: GPointer) {
         let default_user = std::env::var("USER").unwrap_or_else(|_| "dionipe".to_string());
         let active_user = Rc::new(RefCell::new(default_user));
         let login_win_holder: Rc<RefCell<*mut GtkWidget>> = Rc::new(RefCell::new(std::ptr::null_mut()));
+        let login_avatar_slot: Rc<RefCell<*mut GtkWidget>> = Rc::new(RefCell::new(std::ptr::null_mut()));
 
         let desktop_win = build_desktop_shell(
             app,
             Rc::clone(&active_user),
             Rc::clone(&login_win_holder),
+            Rc::clone(&login_avatar_slot),
             dynamic_css,
         );
-        let login_win = build_login_screen(app, desktop_win, Rc::clone(&active_user));
+        let login_win = build_login_screen(
+            app,
+            desktop_win,
+            Rc::clone(&active_user),
+            Rc::clone(&login_avatar_slot),
+        );
         *login_win_holder.borrow_mut() = login_win;
 
         // Start on BijiOS Native Liquid Glass Login Screen (1x PAM login)

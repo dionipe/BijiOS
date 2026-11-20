@@ -1136,6 +1136,78 @@ button.wp-tile-active {
     font-weight: 800;
 }
 
+/* Custom User Profile Avatars (Circular Photo + Curated Gradient Presets) */
+.avatar-photo-frame {
+    border-radius: 999px;
+    border: 2px solid rgba(47, 125, 79, 0.35);
+    background-color: #12332A;
+}
+
+.avatar-circle-sm {
+    border-radius: 999px;
+    min-width: 18px;
+    min-height: 18px;
+    font-size: 10px;
+    font-weight: 800;
+    color: #FFFFFF;
+}
+
+.avatar-circle-md {
+    border-radius: 999px;
+    min-width: 56px;
+    min-height: 56px;
+    font-size: 24px;
+    font-weight: 800;
+    color: #FFFFFF;
+    box-shadow: 0 4px 12px rgba(18, 51, 42, 0.16);
+}
+
+.avatar-circle-lg {
+    border-radius: 999px;
+    min-width: 76px;
+    min-height: 76px;
+    font-size: 32px;
+    font-weight: 800;
+    color: #FFFFFF;
+    box-shadow: 0 6px 18px rgba(18, 51, 42, 0.22);
+}
+
+.avatar-grad-green { background-image: linear-gradient(135deg, #2F7D4F 0%, #7FBF6A 100%); }
+.avatar-grad-gold { background-image: linear-gradient(135deg, #D97706 0%, #F59E0B 100%); }
+.avatar-grad-ocean { background-image: linear-gradient(135deg, #0284C7 0%, #38BDF8 100%); }
+.avatar-grad-indigo { background-image: linear-gradient(135deg, #4F46E5 0%, #818CF8 100%); }
+.avatar-grad-rose { background-image: linear-gradient(135deg, #E11D48 0%, #FB7185 100%); }
+.avatar-grad-teal { background-image: linear-gradient(135deg, #0D9488 0%, #2DD4BF 100%); }
+.avatar-grad-forest { background-image: linear-gradient(135deg, #12332A 0%, #2F7D4F 100%); }
+.avatar-grad-sunset { background-image: linear-gradient(135deg, #EA580C 0%, #E8A33D 100%); }
+.avatar-grad-plum { background-image: linear-gradient(135deg, #7C3AED 0%, #C084FC 100%); }
+.avatar-grad-slate { background-image: linear-gradient(135deg, #334155 0%, #64748B 100%); }
+
+button.avatar-pick-btn {
+    background-image: none;
+    background-color: #FFFFFF;
+    border: 2px solid #E2E8F0;
+    border-radius: 14px;
+    padding: 8px;
+    color: #12332A;
+    box-shadow: none;
+}
+
+button.avatar-pick-btn:hover {
+    border-color: #7FBF6A;
+    background-color: #F8FAF9;
+}
+
+button.avatar-pick-btn-active {
+    background-image: none;
+    background-color: #F4EBD9;
+    border: 2px solid #2F7D4F;
+    border-radius: 14px;
+    padding: 8px;
+    color: #12332A;
+    box-shadow: 0 3px 10px rgba(47, 125, 79, 0.20);
+}
+
 .kv-key {
     font-size: 12px;
     font-weight: 600;

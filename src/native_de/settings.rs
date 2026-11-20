@@ -449,9 +449,9 @@ pub fn open_system_settings(
         gtk_stack_add_named(stack, gen_page, n_gen.as_ptr());
 
         // ---------------------------------------------------------------------
-        // PAGE 4: Users & Groups (Profile, Add/Edit/Password User, Groups)
+        // PAGE 4: Users & Groups (Profile, Avatar, Add/Edit/Password User, Groups)
         // ---------------------------------------------------------------------
-        let usr_page = build_users_page(app);
+        let usr_page = build_users_page(app, Rc::clone(&handles));
         let n_usr = cstr("users");
         gtk_stack_add_named(stack, usr_page, n_usr.as_ptr());
 
@@ -1009,9 +1009,309 @@ unsafe fn build_general_page(
 }
 
 // ============================================================================
-// Page 4: Users & Groups (Profile, Add/Edit/Password User, Groups)
+// Page 4: Users & Groups (Profile, Custom Avatar, Add/Edit/Password, Groups)
 // ============================================================================
-unsafe fn build_users_page(app: *mut GtkApplication) -> *mut GtkWidget {
+fn collect_local_images(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let Ok(rd) = fs::read_dir(dir) else { return out };
+    for ent in rd.flatten() {
+        let p = ent.path();
+        if p.is_file() {
+            if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                let e = ext.to_lowercase();
+                if matches!(e.as_str(), "png" | "jpg" | "jpeg" | "webp" | "svg") {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+fn persist_custom_avatar_image(src: &std::path::Path) -> Option<String> {
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .filter(|e| matches!(e.as_str(), "png" | "jpg" | "jpeg" | "webp" | "svg"))
+        .unwrap_or_else(|| "png".to_string());
+    let dest_dir = crate::native_de::apps::home_dir()
+        .join(".config")
+        .join("bijios-desktop");
+    let _ = fs::create_dir_all(&dest_dir);
+    let dest = dest_dir.join(format!("avatar.{}", ext));
+    if src != dest {
+        fs::copy(src, &dest).ok()?;
+    }
+    Some(format!("file:{}", dest.to_string_lossy()))
+}
+
+unsafe fn open_avatar_picker_dialog(
+    app: *mut GtkApplication,
+    handles: Rc<DesktopHandles>,
+    username: String,
+    profile_avatar_holder: *mut GtkWidget,
+    status_lbl: *mut GtkWidget,
+) {
+    let dlg = create_app_window(app, "🖼️ Choose Profile Avatar", 520, 560);
+    gtk_window_set_modal(dlg, 1);
+
+    let scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(scroll, GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    let root = new_box(GTK_ORIENTATION_VERTICAL, 14, &[]);
+    set_margin_all(root, 20);
+
+    // Live Preview Header
+    let prev_card = new_box(GTK_ORIENTATION_HORIZONTAL, 16, &["app-card"]);
+    let preview_slot = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+    let cur_av = handles.settings.borrow().user_avatar.clone();
+    gtk_box_append(preview_slot, new_user_avatar_widget(&cur_av, &username, 76));
+
+    let prev_col = new_box(GTK_ORIENTATION_VERTICAL, 4, &[]);
+    gtk_widget_set_valign(prev_col, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand(prev_col, 1);
+    let p_title = new_label(&format!("Profile Avatar — @{}", username), &["app-heading"]);
+    gtk_label_set_xalign(p_title, 0.0);
+    let p_sub = new_label(
+        "Choose a built-in BijiOS avatar or select your own photo (PNG, JPG, WebP, SVG).",
+        &["app-muted"],
+    );
+    gtk_label_set_xalign(p_sub, 0.0);
+    gtk_label_set_wrap(p_sub, 1);
+    gtk_box_append(prev_col, p_title);
+    gtk_box_append(prev_col, p_sub);
+
+    gtk_box_append(prev_card, preview_slot);
+    gtk_box_append(prev_card, prev_col);
+    gtk_box_append(root, prev_card);
+
+    let dlg_status = new_label("", &["app-muted"]);
+    gtk_label_set_xalign(dlg_status, 0.0);
+
+    let apply_avatar: Rc<dyn Fn(String, &str)> = {
+        let h = Rc::clone(&handles);
+        let u = username.clone();
+        Rc::new(move |new_av: String, msg: &str| {
+            h.settings.borrow_mut().user_avatar = new_av.clone();
+            apply_desktop_settings(&h);
+
+            clear_box_children(preview_slot);
+            gtk_box_append(preview_slot, new_user_avatar_widget(&new_av, &u, 76));
+
+            clear_box_children(profile_avatar_holder);
+            gtk_box_append(profile_avatar_holder, new_user_avatar_widget(&new_av, &u, 60));
+
+            set_label_text(dlg_status, msg);
+            set_label_text(status_lbl, msg);
+        })
+    };
+
+    // Section 1: Built-in BijiOS Presets
+    let pre_card = new_box(GTK_ORIENTATION_VERTICAL, 8, &["app-card"]);
+    let pre_hdr = new_label("✨ BUILT-IN BIJIOS AVATARS", &["app-section-title"]);
+    gtk_label_set_xalign(pre_hdr, 0.0);
+    gtk_box_append(pre_card, pre_hdr);
+
+    let pre_flow = gtk_flow_box_new();
+    gtk_flow_box_set_max_children_per_line(pre_flow, 5);
+    gtk_flow_box_set_min_children_per_line(pre_flow, 4);
+    gtk_flow_box_set_row_spacing(pre_flow, 8);
+    gtk_flow_box_set_column_spacing(pre_flow, 8);
+    gtk_flow_box_set_selection_mode(pre_flow, 0);
+
+    let presets: [(&str, &str); 10] = [
+        ("initial", "Initial"),
+        ("preset:🌱:avatar-grad-green", "Sprout"),
+        ("preset:🧑‍💻:avatar-grad-forest", "Developer"),
+        ("preset:🦊:avatar-grad-sunset", "Fox"),
+        ("preset:🦅:avatar-grad-gold", "Garuda"),
+        ("preset:🐼:avatar-grad-slate", "Panda"),
+        ("preset:🚀:avatar-grad-indigo", "Rocket"),
+        ("preset:🏔️:avatar-grad-ocean", "Alpine"),
+        ("preset:🎨:avatar-grad-rose", "Creator"),
+        ("preset:🛡️:avatar-grad-teal", "Guardian"),
+    ];
+
+    let preset_btns: Rc<RefCell<Vec<(String, *mut GtkWidget)>>> = Rc::new(RefCell::new(Vec::new()));
+    for (val, label) in presets {
+        let is_cur = cur_av == val;
+        let btn = gtk_button_new();
+        add_css(btn, if is_cur { "avatar-pick-btn-active" } else { "avatar-pick-btn" });
+        let col = new_box(GTK_ORIENTATION_VERTICAL, 4, &[]);
+        gtk_widget_set_halign(col, GTK_ALIGN_CENTER);
+        gtk_box_append(col, new_user_avatar_widget(val, &username, 46));
+        let cap = new_label(label, &["finder-meta-lbl"]);
+        gtk_box_append(col, cap);
+        gtk_button_set_child(btn, col);
+        gtk_flow_box_append(pre_flow, btn);
+        preset_btns.borrow_mut().push((val.to_string(), btn));
+
+        let val_s = val.to_string();
+        let lbl_s = label.to_string();
+        let all_b = Rc::clone(&preset_btns);
+        let aa = Rc::clone(&apply_avatar);
+        connect_signal(btn, "clicked", move || {
+            for (k, b) in all_b.borrow().iter() {
+                remove_css(*b, "avatar-pick-btn-active");
+                add_css(*b, "avatar-pick-btn");
+                if k == &val_s {
+                    remove_css(*b, "avatar-pick-btn");
+                    add_css(*b, "avatar-pick-btn-active");
+                }
+            }
+            aa(val_s.clone(), &format!("✅ Profile avatar updated to '{}'.", lbl_s));
+        });
+    }
+    gtk_box_append(pre_card, pre_flow);
+    gtk_box_append(root, pre_card);
+
+    // Section 2: Custom Photo from Local Folders or Direct Path
+    let img_card = new_box(GTK_ORIENTATION_VERTICAL, 10, &["app-card"]);
+    let img_hdr = new_label("📷 CUSTOM IMAGE / PHOTO", &["app-section-title"]);
+    gtk_label_set_xalign(img_hdr, 0.0);
+    gtk_box_append(img_card, img_hdr);
+
+    let path_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    let path_entry = gtk_entry_new();
+    gtk_widget_set_hexpand(path_entry, 1);
+    let ph = cstr("/home/dionipe/Pictures/avatar.png");
+    gtk_entry_set_placeholder_text(path_entry, ph.as_ptr());
+    if let Some(p) = cur_av.strip_prefix("file:") {
+        set_entry_text(path_entry, p);
+    }
+    let btn_apply_img = new_button("Apply Image", &["primary-btn"]);
+    gtk_box_append(path_row, path_entry);
+    gtk_box_append(path_row, btn_apply_img);
+    gtk_box_append(img_card, path_row);
+
+    {
+        let aa = Rc::clone(&apply_avatar);
+        connect_signal(btn_apply_img, "clicked", move || {
+            let raw = get_entry_text(path_entry).trim().to_string();
+            let p = std::path::PathBuf::from(&raw);
+            if raw.is_empty() || !p.is_file() {
+                set_label_text(dlg_status, "❌ Image file not found. Check the file path.");
+                return;
+            }
+            if let Some(saved) = persist_custom_avatar_image(&p) {
+                aa(saved, "✅ Custom profile photo applied!");
+            } else {
+                set_label_text(dlg_status, "❌ Failed to load image file.");
+            }
+        });
+    }
+
+    // Quick Local Folder Scanner (Pictures / Downloads / Desktop / Home)
+    let home = crate::native_de::apps::home_dir();
+    let folders: [(&str, std::path::PathBuf); 4] = [
+        ("Pictures", home.join("Pictures")),
+        ("Downloads", home.join("Downloads")),
+        ("Desktop", home.join("Desktop")),
+        ("Home", home.clone()),
+    ];
+    let folder_tabs = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+    let gallery_flow = gtk_flow_box_new();
+    gtk_flow_box_set_max_children_per_line(gallery_flow, 5);
+    gtk_flow_box_set_min_children_per_line(gallery_flow, 3);
+    gtk_flow_box_set_row_spacing(gallery_flow, 8);
+    gtk_flow_box_set_column_spacing(gallery_flow, 8);
+    gtk_flow_box_set_selection_mode(gallery_flow, 0);
+
+    let empty_gallery_lbl = new_label(
+        "No images found in this folder. Place PNG/JPG/WebP files in ~/Pictures or enter a path above.",
+        &["finder-meta-lbl"],
+    );
+    gtk_label_set_xalign(empty_gallery_lbl, 0.0);
+    gtk_label_set_wrap(empty_gallery_lbl, 1);
+
+    let load_folder: Rc<dyn Fn(&std::path::Path)> = {
+        let aa = Rc::clone(&apply_avatar);
+        let u = username.clone();
+        Rc::new(move |dir: &std::path::Path| {
+            clear_flow_children(gallery_flow);
+            let imgs = collect_local_images(dir);
+            if imgs.is_empty() {
+                gtk_widget_set_visible(empty_gallery_lbl, 1);
+                return;
+            }
+            gtk_widget_set_visible(empty_gallery_lbl, 0);
+            for img_path in imgs.into_iter().take(20) {
+                let fname = img_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("image")
+                    .to_string();
+                let short = if fname.len() > 11 {
+                    format!("{}…", &fname[..10])
+                } else {
+                    fname.clone()
+                };
+                let btn = gtk_button_new();
+                add_css(btn, "avatar-pick-btn");
+                let col = new_box(GTK_ORIENTATION_VERTICAL, 4, &[]);
+                gtk_widget_set_halign(col, GTK_ALIGN_CENTER);
+                let spec = format!("file:{}", img_path.to_string_lossy());
+                gtk_box_append(col, new_user_avatar_widget(&spec, &u, 48));
+                let cap = new_label(&short, &["finder-meta-lbl"]);
+                gtk_box_append(col, cap);
+                gtk_button_set_child(btn, col);
+                gtk_flow_box_append(gallery_flow, btn);
+
+                let p_click = img_path.clone();
+                let aa_c = Rc::clone(&aa);
+                connect_signal(btn, "clicked", move || {
+                    set_entry_text(path_entry, &p_click.to_string_lossy());
+                    if let Some(saved) = persist_custom_avatar_image(&p_click) {
+                        aa_c(saved, &format!("✅ Applied photo '{}'.", fname));
+                    }
+                });
+            }
+        })
+    };
+
+    let f_btns: Rc<RefCell<Vec<*mut GtkWidget>>> = Rc::new(RefCell::new(Vec::new()));
+    for (idx, (lbl, dir_path)) in folders.iter().enumerate() {
+        let b = new_button(lbl, if idx == 0 { &["seg-btn-active"] } else { &["seg-btn"] });
+        gtk_box_append(folder_tabs, b);
+        f_btns.borrow_mut().push(b);
+
+        let dp = dir_path.clone();
+        let all_f = Rc::clone(&f_btns);
+        let lf = Rc::clone(&load_folder);
+        connect_signal(b, "clicked", move || {
+            for &bi in all_f.borrow().iter() {
+                remove_css(bi, "seg-btn-active");
+                add_css(bi, "seg-btn");
+            }
+            remove_css(b, "seg-btn");
+            add_css(b, "seg-btn-active");
+            lf(&dp);
+        });
+    }
+
+    gtk_box_append(img_card, folder_tabs);
+    gtk_box_append(img_card, empty_gallery_lbl);
+    gtk_box_append(img_card, gallery_flow);
+    gtk_box_append(root, img_card);
+
+    gtk_box_append(root, dlg_status);
+
+    let done_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    gtk_widget_set_halign(done_row, GTK_ALIGN_END);
+    let btn_done = new_button("Done", &["primary-btn"]);
+    connect_signal(btn_done, "clicked", move || gtk_window_close(dlg));
+    gtk_box_append(done_row, btn_done);
+    gtk_box_append(root, done_row);
+
+    load_folder(&folders[0].1);
+
+    gtk_scrolled_window_set_child(scroll, root);
+    gtk_window_set_child(dlg, scroll);
+    gtk_window_present(dlg);
+}
+
+unsafe fn build_users_page(app: *mut GtkApplication, handles: Rc<DesktopHandles>) -> *mut GtkWidget {
     let scroller = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(scroller, GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_widget_set_hexpand(scroller, 1);
@@ -1022,13 +1322,13 @@ unsafe fn build_users_page(app: *mut GtkApplication) -> *mut GtkWidget {
     gtk_label_set_xalign(title, 0.0);
     gtk_box_append(page, title);
 
-    let status_lbl = new_label("Manage Linux accounts, passwords, and groups.", &["app-muted"]);
+    let status_lbl = new_label("Manage Linux accounts, profile avatars, passwords, and groups.", &["app-muted"]);
     gtk_label_set_xalign(status_lbl, 0.0);
     gtk_box_append(page, status_lbl);
 
     let cur_user = std::env::var("USER").unwrap_or_else(|_| "dionipe".to_string());
 
-    // 1. My Profile Card
+    // 1. My Profile Card (with Customizable Avatar)
     let users_init = read_linux_users();
     let me = users_init
         .iter()
@@ -1044,15 +1344,10 @@ unsafe fn build_users_page(app: *mut GtkApplication) -> *mut GtkWidget {
         });
 
     let prof_card = new_box(GTK_ORIENTATION_HORIZONTAL, 14, &["app-card"]);
-    let init_ch = me
-        .username
-        .chars()
-        .next()
-        .unwrap_or('U')
-        .to_uppercase()
-        .to_string();
-    let av = new_label(&init_ch, &["user-avatar-circle"]);
-    gtk_widget_set_valign(av, GTK_ALIGN_CENTER);
+    let avatar_holder = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+    gtk_widget_set_valign(avatar_holder, GTK_ALIGN_CENTER);
+    let cur_av = handles.settings.borrow().user_avatar.clone();
+    gtk_box_append(avatar_holder, new_user_avatar_widget(&cur_av, &me.username, 60));
 
     let pcol = new_box(GTK_ORIENTATION_VERTICAL, 3, &[]);
     gtk_widget_set_hexpand(pcol, 1);
@@ -1070,16 +1365,30 @@ unsafe fn build_users_page(app: *mut GtkApplication) -> *mut GtkWidget {
     gtk_box_append(pcol, pname);
     gtk_box_append(pcol, pmeta);
 
+    let p_actions = new_box(GTK_ORIENTATION_VERTICAL, 6, &[]);
+    gtk_widget_set_valign(p_actions, GTK_ALIGN_CENTER);
+    let btn_change_av = new_button("🖼️ Change Avatar", &["primary-btn"]);
     let btn_my_pw = new_button("🔑 Change Password", &["toolbar-btn"]);
-    gtk_widget_set_valign(btn_my_pw, GTK_ALIGN_CENTER);
-    let my_u = me.username.clone();
-    connect_signal(btn_my_pw, "clicked", move || {
-        open_change_password_dialog(app, my_u.clone(), status_lbl);
-    });
 
-    gtk_box_append(prof_card, av);
+    {
+        let h = Rc::clone(&handles);
+        let my_u = me.username.clone();
+        connect_signal(btn_change_av, "clicked", move || {
+            open_avatar_picker_dialog(app, Rc::clone(&h), my_u.clone(), avatar_holder, status_lbl);
+        });
+    }
+    {
+        let my_u = me.username.clone();
+        connect_signal(btn_my_pw, "clicked", move || {
+            open_change_password_dialog(app, my_u.clone(), status_lbl);
+        });
+    }
+    gtk_box_append(p_actions, btn_change_av);
+    gtk_box_append(p_actions, btn_my_pw);
+
+    gtk_box_append(prof_card, avatar_holder);
     gtk_box_append(prof_card, pcol);
-    gtk_box_append(prof_card, btn_my_pw);
+    gtk_box_append(prof_card, p_actions);
     gtk_box_append(page, prof_card);
 
     // 2. Users List Card
