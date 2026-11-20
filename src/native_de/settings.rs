@@ -156,6 +156,18 @@ fn read_uptime_str() -> String {
 }
 
 fn run_pkexec_sh(script: &str) -> bool {
+    // Try non-interactive sudo first (works seamlessly on Openbox without a Polkit GUI agent)
+    if let Ok(st) = Command::new("sudo")
+        .args(["-n", "/bin/bash", "-c", script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+    {
+        if st.success() {
+            return true;
+        }
+    }
     Command::new("pkexec")
         .args(["/bin/bash", "-c", script])
         .stdin(Stdio::null())
@@ -343,16 +355,11 @@ pub fn open_system_settings(
         gtk_widget_set_halign(sidebar, GTK_ALIGN_START);
 
         let cur_user = std::env::var("USER").unwrap_or_else(|_| "dionipe".to_string());
-        let initial = cur_user
-            .chars()
-            .next()
-            .unwrap_or('B')
-            .to_uppercase()
-            .to_string();
+        let cur_av = handles.settings.borrow().user_avatar.clone();
 
-        // Profile Mini Card in Sidebar
+        // Profile Mini Card in Sidebar (reflects custom user avatar)
         let prof_mini = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &["app-card"]);
-        let av = new_label(&initial, &["user-avatar-circle"]);
+        let av = new_user_avatar_widget(&cur_av, &cur_user, 44);
         gtk_widget_set_valign(av, GTK_ALIGN_CENTER);
         let prof_txt = new_box(GTK_ORIENTATION_VERTICAL, 1, &[]);
         let p_name = new_label(&cur_user, &["finder-name-btn"]);
@@ -932,42 +939,60 @@ unsafe fn build_display_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
             }
         };
 
-        connect_notify(sw, "notify::active", move || {
-            let want_on = gtk_switch_get_active(sw) != 0;
-            let cmd = if want_on {
-                format!("systemctl enable --now {}", unit)
-            } else {
-                format!("systemctl disable --now {}", unit)
-            };
-            if run_pkexec_sh(&cmd) {
-                let real_on = is_systemd_active(unit);
-                update_badge(real_on);
-                set_label_text(
-                    vnc_status,
-                    &format!(
-                        "✅ {} is now {}.",
-                        unit,
-                        if real_on { "ENABLED & RUNNING" } else { "DISABLED & STOPPED" }
-                    ),
-                );
-            } else {
-                let real_on = is_systemd_active(unit);
-                update_badge(real_on);
-                set_label_text(vnc_status, &format!("❌ Failed to toggle {} (authentication cancelled).", unit));
-            }
-        });
+        let sw_guard = Rc::new(std::cell::Cell::new(false));
+        {
+            let guard = Rc::clone(&sw_guard);
+            connect_notify(sw, "notify::active", move || {
+                if guard.get() {
+                    return;
+                }
+                let want_on = gtk_switch_get_active(sw) != 0;
+                let cmd = if want_on {
+                    format!("systemctl enable --now {}", unit)
+                } else {
+                    format!("systemctl disable --now {}", unit)
+                };
+                if run_pkexec_sh(&cmd) {
+                    let real_on = is_systemd_active(unit);
+                    update_badge(real_on);
+                    set_label_text(
+                        vnc_status,
+                        &format!(
+                            "✅ {} is now {}.",
+                            unit,
+                            if real_on { "ENABLED & RUNNING" } else { "DISABLED & STOPPED" }
+                        ),
+                    );
+                } else {
+                    let real_on = is_systemd_active(unit);
+                    update_badge(real_on);
+                    guard.set(true);
+                    gtk_switch_set_active(sw, if real_on { 1 } else { 0 });
+                    guard.set(false);
+                    set_label_text(
+                        vnc_status,
+                        &format!("❌ Failed to toggle {} (admin permission required).", unit),
+                    );
+                }
+            });
+        }
 
-        connect_signal(btn_restart, "clicked", move || {
-            let cmd = format!("systemctl restart {}", unit);
-            if run_pkexec_sh(&cmd) {
-                let real_on = is_systemd_active(unit);
-                update_badge(real_on);
-                gtk_switch_set_active(sw, if real_on { 1 } else { 0 });
-                set_label_text(vnc_status, &format!("✅ Restarted {}.", unit));
-            } else {
-                set_label_text(vnc_status, &format!("❌ Failed to restart {}.", unit));
-            }
-        });
+        {
+            let guard = Rc::clone(&sw_guard);
+            connect_signal(btn_restart, "clicked", move || {
+                let cmd = format!("systemctl restart {}", unit);
+                if run_pkexec_sh(&cmd) {
+                    let real_on = is_systemd_active(unit);
+                    update_badge(real_on);
+                    guard.set(true);
+                    gtk_switch_set_active(sw, if real_on { 1 } else { 0 });
+                    guard.set(false);
+                    set_label_text(vnc_status, &format!("✅ Restarted {}.", unit));
+                } else {
+                    set_label_text(vnc_status, &format!("❌ Failed to restart {}.", unit));
+                }
+            });
+        }
 
         gtk_box_append(row, col);
         gtk_box_append(row, btn_restart);
