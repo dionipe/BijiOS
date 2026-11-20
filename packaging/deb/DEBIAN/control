@@ -5,7 +5,7 @@ Priority: optional
 Architecture: amd64
 Maintainer: BijiOS Team <admin@bijios.local>
 Depends: xserver-xorg, xinit, openbox, xcompmgr, lightdm, lightdm-gtk-greeter, libgtk-4-1, libvte-2.91-gtk4-0, curl, python3, systemd, xdg-utils, fonts-dejavu-core
-Recommends: bash-completion, network-manager, fonts-noto-color-emoji, policykit-1, pulseaudio | pipewire-audio
+Recommends: bash-completion, sshfs, network-manager, fonts-noto-color-emoji, policykit-1, pulseaudio | pipewire-audio
 Description: BijiOS 1.0.0 (Padi) Full Native Desktop Environment (Pure Rust + GTK4)
  100% Native Rust + GTK4 Linux Desktop Environment for BijiOS v1.0.0 "Padi"
  featuring macOS Golden Gate Liquid Glass UI (Zero Chromium).

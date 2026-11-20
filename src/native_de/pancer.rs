@@ -5,12 +5,13 @@
 //!   Shell (Duplicate Window, Duplicate Tab, Split Vertical, Split Horizontal, Close Tab)
 //! - Dynamic Host Tab Bar: | host 1 | host 2 | + | (auto-detects local host vs active SSH host)
 
-use crate::native_de::apps::{create_app_window, home_dir};
+use crate::native_de::apps::{create_app_window, home_dir, open_finder_at};
 use crate::native_de::gtk4_ffi::*;
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, CStr};
 use std::fs;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::rc::Rc;
 
 // ============================================================================
@@ -676,7 +677,7 @@ unsafe fn open_about_pancer(app: *mut GtkApplication, parent_win: *mut GtkWidget
     gtk_grid_set_column_spacing(hk_grid, 16);
     gtk_grid_set_column_homogeneous(hk_grid, 1);
 
-    let shortcuts: [(&str, &str); 10] = [
+    let shortcuts: [(&str, &str); 12] = [
         ("Ctrl+Shift+N", "New Window"),
         ("Ctrl+Shift+T", "New Tab"),
         ("Ctrl+Shift+C / V", "Copy / Paste"),
@@ -684,7 +685,9 @@ unsafe fn open_about_pancer(app: *mut GtkApplication, parent_win: *mut GtkWidget
         ("Ctrl+Shift+U / B", "Duplicate Win / Tab"),
         ("Ctrl+Shift+D / E", "Split Vert / Horiz"),
         ("Ctrl+Shift+S", "Hide / Unhide SSH Sidebar"),
+        ("Ctrl+Shift+M", "Broadcast Command Bar"),
         ("Ctrl+Shift+W", "Close Active Tab"),
+        ("Esc", "Close Menu / Broadcast"),
         ("→  or  End", "Accept Auto-Suggestion"),
         ("Tab / Shift+Tab", "Auto-Completion Menu"),
     ];
@@ -736,6 +739,333 @@ unsafe fn open_about_pancer(app: *mut GtkApplication, parent_win: *mut GtkWidget
     gtk_window_present(dlg);
 }
 
+// ============================================================================
+// Remote SSH File Explorer (Browse, Download, Upload) & SSHFS Mount in Akar
+// ============================================================================
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+fn is_mountpoint_active(dir: &PathBuf) -> bool {
+    let ds = dir.to_string_lossy().to_string();
+    fs::read_to_string("/proc/mounts")
+        .map(|txt| txt.lines().any(|l| l.split_whitespace().nth(1) == Some(ds.as_str())))
+        .unwrap_or(false)
+}
+
+fn mount_ssh_host(alias: &str, remote_dir: &str) -> Result<PathBuf, String> {
+    let safe = alias.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_' && c != '.', "_");
+    let mnt = home_dir().join("Mounts").join(&safe);
+    let _ = fs::create_dir_all(&mnt);
+    if is_mountpoint_active(&mnt) {
+        return Ok(mnt);
+    }
+    let remote_spec = if remote_dir.is_empty() || remote_dir == "." || remote_dir == "~" {
+        format!("{}:", alias)
+    } else {
+        format!("{}:{}", alias, remote_dir)
+    };
+    let out = Command::new("sshfs")
+        .args([
+            "-o",
+            "reconnect,ServerAliveInterval=15,BatchMode=yes,ConnectTimeout=8",
+            &remote_spec,
+            &mnt.to_string_lossy(),
+        ])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => Ok(mnt),
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            Err(if err.is_empty() {
+                "SSHFS mount failed (check SSH key / BatchMode access)".to_string()
+            } else {
+                err
+            })
+        }
+        Err(e) => Err(format!("sshfs error: {}", e)),
+    }
+}
+
+#[derive(Clone)]
+struct RemoteEntry {
+    name: String,
+    is_dir: bool,
+    size: String,
+}
+
+fn list_remote_ssh_dir(alias: &str, remote_dir: &str) -> Result<(String, Vec<RemoteEntry>), String> {
+    let dir_arg = if remote_dir.trim().is_empty() || remote_dir.trim() == "~" {
+        "$HOME".to_string()
+    } else {
+        sh_quote(remote_dir.trim())
+    };
+    let remote_cmd = format!(
+        "cd {d} 2>/dev/null && pwd && ls -la --group-directories-first 2>/dev/null || (cd {d} && pwd && ls -la)",
+        d = dir_arg
+    );
+    let out = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=6", alias, &remote_cmd])
+        .output()
+        .map_err(|e| format!("Failed to run ssh: {}", e))?;
+
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if err.is_empty() {
+            "SSH connection failed (configure SSH key for passwordless browsing)".to_string()
+        } else {
+            err
+        });
+    }
+
+    let txt = String::from_utf8_lossy(&out.stdout);
+    let mut lines = txt.lines();
+    let resolved_pwd = lines.next().unwrap_or(remote_dir).trim().to_string();
+    let mut entries = Vec::new();
+    for line in lines {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with("total ") {
+            continue;
+        }
+        let parts: Vec<&str> = t.split_whitespace().collect();
+        if parts.len() < 9 {
+            continue;
+        }
+        let perms = parts[0];
+        let size = parts[4].to_string();
+        let name = parts[8..].join(" ");
+        let clean_name = name.split(" -> ").next().unwrap_or(&name).to_string();
+        if clean_name == "." || clean_name == ".." {
+            continue;
+        }
+        let is_dir = perms.starts_with('d');
+        entries.push(RemoteEntry {
+            name: clean_name,
+            is_dir,
+            size,
+        });
+    }
+    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    Ok((resolved_pwd, entries))
+}
+
+unsafe fn open_ssh_file_browser(
+    app: *mut GtkApplication,
+    parent_win: *mut GtkWidget,
+    alias: String,
+) {
+    let win = create_app_window(app, &format!("📂 Remote Files — {}", alias), 780, 560);
+    gtk_window_set_transient_for(win, parent_win);
+
+    let root = new_box(GTK_ORIENTATION_VERTICAL, 8, &[]);
+    set_margin_all(root, 14);
+
+    // Top Navigation + Mount in Akar Toolbar
+    let nav = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+    let btn_up = new_button("⬆", &["toolbar-btn"]);
+    let path_entry = gtk_entry_new();
+    gtk_widget_set_hexpand(path_entry, 1);
+    set_entry_text(path_entry, "~");
+    let btn_go = new_button("🔄 Load", &["toolbar-btn"]);
+    let btn_mount = new_button("🔗 Mount in Akar", &["primary-btn"]);
+    gtk_box_append(nav, btn_up);
+    gtk_box_append(nav, path_entry);
+    gtk_box_append(nav, btn_go);
+    gtk_box_append(nav, btn_mount);
+    gtk_box_append(root, nav);
+
+    // Upload Bar
+    let up_row = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &["app-card"]);
+    let up_lbl = new_label("⬆ Upload Local File:", &["kv-key"]);
+    let up_entry = gtk_entry_new();
+    gtk_widget_set_hexpand(up_entry, 1);
+    let ph_up = cstr("/home/dionipe/Documents/file.txt");
+    gtk_entry_set_placeholder_text(up_entry, ph_up.as_ptr());
+    let btn_upload = new_button("⬆ Upload", &["primary-btn"]);
+    gtk_box_append(up_row, up_lbl);
+    gtk_box_append(up_row, up_entry);
+    gtk_box_append(up_row, btn_upload);
+    gtk_box_append(root, up_row);
+
+    let status_lbl = new_label(&format!("Connecting to '{}'...", alias), &["app-muted"]);
+    gtk_label_set_xalign(status_lbl, 0.0);
+    gtk_label_set_wrap(status_lbl, 1);
+    gtk_box_append(root, status_lbl);
+
+    // Remote Files List
+    let scroller = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(scroller, GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_hexpand(scroller, 1);
+    gtk_widget_set_vexpand(scroller, 1);
+    let list_box = new_box(GTK_ORIENTATION_VERTICAL, 3, &[]);
+    gtk_scrolled_window_set_child(scroller, list_box);
+    gtk_box_append(root, scroller);
+
+    let cur_remote_dir = Rc::new(RefCell::new("~".to_string()));
+    let populate: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
+    let pop_c = Rc::clone(&populate);
+
+    {
+        let al = alias.clone();
+        let crd = Rc::clone(&cur_remote_dir);
+        *populate.borrow_mut() = Box::new(move || {
+            clear_box_children(list_box);
+            let target = crd.borrow().clone();
+            match list_remote_ssh_dir(&al, &target) {
+                Ok((pwd, entries)) => {
+                    *crd.borrow_mut() = pwd.clone();
+                    set_entry_text(path_entry, &pwd);
+                    set_label_text(
+                        status_lbl,
+                        &format!("✅ Connected to {} — {} item(s) in {}", al, entries.len(), pwd),
+                    );
+                    if entries.is_empty() {
+                        let em = new_label("Empty remote directory.", &["finder-meta-lbl"]);
+                        set_margin_all(em, 16);
+                        gtk_box_append(list_box, em);
+                        return;
+                    }
+                    for (idx, ent) in entries.into_iter().enumerate() {
+                        let cls = if idx % 2 == 0 { "act-proc-row" } else { "act-proc-row-alt" };
+                        let row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[cls]);
+                        let ic = if ent.is_dir { "📁" } else { "📄" };
+                        let name_btn = new_left_button(ic, &ent.name, &["sidebar-btn"]);
+                        gtk_widget_set_hexpand(name_btn, 1);
+                        let sz_lbl = new_label(if ent.is_dir { "Folder" } else { &ent.size }, &["act-proc-mono"]);
+                        gtk_widget_set_size_request(sz_lbl, 80, -1);
+
+                        gtk_box_append(row, name_btn);
+                        gtk_box_append(row, sz_lbl);
+
+                        let full_remote = if pwd == "/" {
+                            format!("/{}", ent.name)
+                        } else {
+                            format!("{}/{}", pwd.trim_end_matches('/'), ent.name)
+                        };
+
+                        if ent.is_dir {
+                            let fr = full_remote.clone();
+                            let crd2 = Rc::clone(&crd);
+                            let pc2 = Rc::clone(&pop_c);
+                            connect_signal(name_btn, "clicked", move || {
+                                *crd2.borrow_mut() = fr.clone();
+                                (pc2.borrow())();
+                            });
+                        } else {
+                            let btn_dl = new_button("⬇ Download", &["toolbar-btn"]);
+                            let al_dl = al.clone();
+                            let fr_dl = full_remote.clone();
+                            let fn_dl = ent.name.clone();
+                            connect_signal(btn_dl, "clicked", move || {
+                                let dl_dir = home_dir().join("Downloads");
+                                let _ = fs::create_dir_all(&dl_dir);
+                                let dest = dl_dir.join(&fn_dl);
+                                let src = format!("{}:{}", al_dl, fr_dl);
+                                let ok = Command::new("scp")
+                                    .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", &src, &dest.to_string_lossy()])
+                                    .status()
+                                    .map(|s| s.success())
+                                    .unwrap_or(false);
+                                set_label_text(
+                                    status_lbl,
+                                    &if ok {
+                                        format!("✅ Downloaded '{}' to ~/Downloads/{}", fn_dl, fn_dl)
+                                    } else {
+                                        format!("❌ Failed to download '{}' via scp.", fn_dl)
+                                    },
+                                );
+                            });
+                            gtk_box_append(row, btn_dl);
+                        }
+                        gtk_box_append(list_box, row);
+                    }
+                }
+                Err(e) => {
+                    set_label_text(status_lbl, &format!("❌ {}", e));
+                }
+            }
+        });
+    }
+
+    // Wire Navigation, Upload & Mount in Akar
+    {
+        let crd = Rc::clone(&cur_remote_dir);
+        let pc = Rc::clone(&populate);
+        connect_signal(btn_up, "clicked", move || {
+            let cur = crd.borrow().clone();
+            let parent = std::path::Path::new(&cur)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "/".to_string());
+            *crd.borrow_mut() = parent;
+            (pc.borrow())();
+        });
+    }
+    {
+        let crd = Rc::clone(&cur_remote_dir);
+        let pc = Rc::clone(&populate);
+        connect_signal(btn_go, "clicked", move || {
+            *crd.borrow_mut() = get_entry_text(path_entry).trim().to_string();
+            (pc.borrow())();
+        });
+    }
+    {
+        let crd = Rc::clone(&cur_remote_dir);
+        let pc = Rc::clone(&populate);
+        connect_signal(path_entry, "activate", move || {
+            *crd.borrow_mut() = get_entry_text(path_entry).trim().to_string();
+            (pc.borrow())();
+        });
+    }
+    {
+        let al = alias.clone();
+        let crd = Rc::clone(&cur_remote_dir);
+        let pc = Rc::clone(&populate);
+        connect_signal(btn_upload, "clicked", move || {
+            let local = get_entry_text(up_entry).trim().to_string();
+            if local.is_empty() || !std::path::Path::new(&local).is_file() {
+                set_label_text(status_lbl, "❌ Local file not found. Enter a valid local file path.");
+                return;
+            }
+            let rdir = crd.borrow().clone();
+            let dest = format!("{}:{}/", al, rdir.trim_end_matches('/'));
+            let ok = Command::new("scp")
+                .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", &local, &dest])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if ok {
+                set_entry_text(up_entry, "");
+                set_label_text(status_lbl, &format!("✅ Uploaded '{}' to {}", local, dest));
+                (pc.borrow())();
+            } else {
+                set_label_text(status_lbl, "❌ Failed to upload file via scp.");
+            }
+        });
+    }
+    {
+        let al = alias.clone();
+        let crd = Rc::clone(&cur_remote_dir);
+        connect_signal(btn_mount, "clicked", move || {
+            let rdir = crd.borrow().clone();
+            match mount_ssh_host(&al, &rdir) {
+                Ok(mnt) => {
+                    set_label_text(status_lbl, &format!("✅ Mounted at {} — opening in Akar...", mnt.display()));
+                    open_finder_at(app, mnt);
+                }
+                Err(e) => {
+                    set_label_text(status_lbl, &format!("❌ {}", e));
+                }
+            }
+        });
+    }
+
+    (populate.borrow())();
+    gtk_window_set_child(win, root);
+    gtk_window_present(win);
+}
+
 pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBuf>) {
     unsafe {
         let win = create_app_window(app, "💻  Pancer", 1040, 580);
@@ -756,6 +1086,9 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         let btn_help = new_button("Help", &["pancer-menu-btn"]);
         let mb_spacer = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
         gtk_widget_set_hexpand(mb_spacer, 1);
+        let btn_broadcast = new_button("📡 Broadcast", &["pancer-sidebar-toggle"]);
+        let tip_bc = cstr("Toggle Broadcast Command Bar (Ctrl+Shift+M)");
+        gtk_widget_set_tooltip_text(btn_broadcast, tip_bc.as_ptr());
         let init_sb_vis = load_sidebar_visible();
         let btn_toggle_sb = new_button(
             if init_sb_vis { "◧ Hide Sidebar" } else { "◧ SSH Hosts" },
@@ -769,6 +1102,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         gtk_box_append(menubar, btn_shell);
         gtk_box_append(menubar, btn_help);
         gtk_box_append(menubar, mb_spacer);
+        gtk_box_append(menubar, btn_broadcast);
         gtk_box_append(menubar, btn_toggle_sb);
         gtk_box_append(root, menubar);
 
@@ -885,13 +1219,43 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         gtk_scrolled_window_set_child(ssh_scroll, ssh_list_box);
         gtk_box_append(ssh_sidebar, ssh_scroll);
 
+        let ssh_status_lbl = new_label("", &["pancer-ssh-meta"]);
+        gtk_label_set_xalign(ssh_status_lbl, 0.0);
+        gtk_label_set_wrap(ssh_status_lbl, 1);
+        gtk_widget_set_visible(ssh_status_lbl, 0);
+        gtk_box_append(ssh_sidebar, ssh_status_lbl);
+
         gtk_box_append(body_hbox, ssh_sidebar);
 
-        // Right Terminal Area (Dynamic Host Tab Bar + Stack)
+        // Right Terminal Area (Broadcast Bar + Dynamic Host Tab Bar + Stack)
         let term_col = new_box(GTK_ORIENTATION_VERTICAL, 0, &[]);
         gtk_widget_set_hexpand(term_col, 1);
         gtk_widget_set_vexpand(term_col, 1);
         gtk_box_append(body_hbox, term_col);
+
+        // Toggleable Broadcast Command Bar (Ctrl+Shift+M)
+        let broadcast_bar = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &["pancer-broadcast-bar"]);
+        gtk_widget_set_visible(broadcast_bar, 0);
+        let bc_badge = new_label("📡 BROADCAST", &["pancer-broadcast-badge"]);
+        let bc_all_tabs = Rc::new(Cell::new(true));
+        let btn_bc_scope = new_button("All Tabs", &["pancer-sidebar-toggle"]);
+        let tip_scope = cstr("Switch between All Tabs & Panes or Current Tab only");
+        gtk_widget_set_tooltip_text(btn_bc_scope, tip_scope.as_ptr());
+        let bc_entry = gtk_entry_new();
+        add_css(bc_entry, "pancer-entry");
+        gtk_widget_set_hexpand(bc_entry, 1);
+        let ph_bc = cstr("Type command to broadcast to terminals (press Enter)...");
+        gtk_entry_set_placeholder_text(bc_entry, ph_bc.as_ptr());
+        let btn_bc_send = new_button("▶ Send", &["pancer-sidebar-toggle"]);
+        let bc_status = new_label("", &["pancer-ssh-meta"]);
+        let btn_bc_close = new_button("✕", &["pancer-ssh-act"]);
+        gtk_box_append(broadcast_bar, bc_badge);
+        gtk_box_append(broadcast_bar, btn_bc_scope);
+        gtk_box_append(broadcast_bar, bc_entry);
+        gtk_box_append(broadcast_bar, btn_bc_send);
+        gtk_box_append(broadcast_bar, bc_status);
+        gtk_box_append(broadcast_bar, btn_bc_close);
+        gtk_box_append(term_col, broadcast_bar);
 
         // Dynamic Host Tab Bar: | 💻 BijiOS | 🔐 host2 | + |
         let tabbar = new_box(GTK_ORIENTATION_HORIZONTAL, 5, &["pancer-tabbar"]);
@@ -1295,6 +1659,78 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             save_sidebar_visible(next_vis);
         });
 
+        let act_toggle_broadcast: Rc<dyn Fn()> = {
+            let st_bc = Rc::clone(&state);
+            Rc::new(move || {
+                hide_all_menus();
+                let now_vis = gtk_widget_get_visible(broadcast_bar) != 0;
+                let next_vis = !now_vis;
+                gtk_widget_set_visible(broadcast_bar, if next_vis { 1 } else { 0 });
+                let lbl = cstr(if next_vis { "📡 Broadcast ON" } else { "📡 Broadcast" });
+                gtk_button_set_label(btn_broadcast, lbl.as_ptr());
+                if next_vis {
+                    gtk_widget_grab_focus(bc_entry);
+                } else if let Some(p) = st_bc.try_borrow().ok().and_then(|s| s.active_pane()) {
+                    gtk_widget_grab_focus(p.vte);
+                }
+            })
+        };
+
+        // Scope switch (All Tabs & Panes vs Current Tab)
+        {
+            let sc = Rc::clone(&bc_all_tabs);
+            connect_signal(btn_bc_scope, "clicked", move || {
+                let next = !sc.get();
+                sc.set(next);
+                let lbl = cstr(if next { "All Tabs" } else { "Current Tab" });
+                gtk_button_set_label(btn_bc_scope, lbl.as_ptr());
+                gtk_widget_grab_focus(bc_entry);
+            });
+        }
+        {
+            let tb = Rc::clone(&act_toggle_broadcast);
+            connect_signal(btn_bc_close, "clicked", move || tb());
+        }
+
+        // Send broadcast command to target VTE panes simultaneously
+        let send_broadcast: Rc<dyn Fn()> = {
+            let st_bc = Rc::clone(&state);
+            let sc = Rc::clone(&bc_all_tabs);
+            Rc::new(move || {
+                let cmd = get_entry_text(bc_entry);
+                if cmd.is_empty() {
+                    return;
+                }
+                let targets: Vec<*mut GtkWidget> = {
+                    let Ok(s) = st_bc.try_borrow() else { return; };
+                    if sc.get() {
+                        s.tabs
+                            .iter()
+                            .flat_map(|t| t.panes.iter().map(|p| p.vte))
+                            .collect()
+                    } else {
+                        s.active_tab()
+                            .map(|t| t.panes.iter().map(|p| p.vte).collect())
+                            .unwrap_or_default()
+                    }
+                };
+                let cmd_nl = format!("{}\n", cmd);
+                let c = cstr(&cmd_nl);
+                for vte in &targets {
+                    vte_terminal_feed_child(*vte, c.as_ptr(), cmd_nl.len() as isize);
+                }
+                set_entry_text(bc_entry, "");
+                set_label_text(bc_status, &format!("✓ Sent to {} pane(s)", targets.len()));
+                gtk_widget_grab_focus(bc_entry);
+            })
+        };
+        {
+            let sb1 = Rc::clone(&send_broadcast);
+            connect_signal(btn_bc_send, "clicked", move || sb1());
+            let sb2 = Rc::clone(&send_broadcast);
+            connect_signal(bc_entry, "activate", move || sb2());
+        }
+
         // Populate ~/.ssh/config Host Sidebar (Connect, Edit, Delete)
         let populate_ssh_hosts: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
         let pop_ssh_c = Rc::clone(&populate_ssh_hosts);
@@ -1332,7 +1768,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                 }
 
                 for h in hosts {
-                    let card = new_box(GTK_ORIENTATION_HORIZONTAL, 4, &["pancer-ssh-card"]);
+                    let card = new_box(GTK_ORIENTATION_VERTICAL, 4, &["pancer-ssh-card"]);
                     let conn_btn = gtk_button_new();
                     add_css(conn_btn, "pancer-ssh-connect");
                     gtk_widget_set_hexpand(conn_btn, 1);
@@ -1355,6 +1791,18 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                     let tip = cstr(&format!("Click to connect: ssh {}", h.alias));
                     gtk_widget_set_tooltip_text(conn_btn, tip.as_ptr());
 
+                    // Compact action row: Files (Download/Upload) | Mount in Akar | Edit | Delete
+                    let act_row = new_box(GTK_ORIENTATION_HORIZONTAL, 4, &[]);
+                    let btn_files = new_button("📂 Files", &["pancer-ssh-act"]);
+                    gtk_widget_set_hexpand(btn_files, 1);
+                    let tip_f = cstr("Browse, Download & Upload Remote Files");
+                    gtk_widget_set_tooltip_text(btn_files, tip_f.as_ptr());
+
+                    let btn_mount = new_button("🔗 Mount", &["pancer-ssh-act"]);
+                    gtk_widget_set_hexpand(btn_mount, 1);
+                    let tip_m = cstr("Mount Host via SSHFS & Open in Akar File Manager");
+                    gtk_widget_set_tooltip_text(btn_mount, tip_m.as_ptr());
+
                     let btn_edit = new_button("✏️", &["pancer-ssh-act"]);
                     let tip_e = cstr("Edit SSH Host");
                     gtk_widget_set_tooltip_text(btn_edit, tip_e.as_ptr());
@@ -1362,10 +1810,44 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                     let tip_d = cstr("Delete SSH Host");
                     gtk_widget_set_tooltip_text(btn_del, tip_d.as_ptr());
 
+                    gtk_box_append(act_row, btn_files);
+                    gtk_box_append(act_row, btn_mount);
+                    gtk_box_append(act_row, btn_edit);
+                    gtk_box_append(act_row, btn_del);
+
                     gtk_box_append(card, conn_btn);
-                    gtk_box_append(card, btn_edit);
-                    gtk_box_append(card, btn_del);
+                    gtk_box_append(card, act_row);
                     gtk_box_append(ssh_list_box, card);
+
+                    // Browse remote folder (Download / Upload)
+                    {
+                        let alias_f = h.alias.clone();
+                        connect_signal(btn_files, "clicked", move || {
+                            hide_all_menus();
+                            open_ssh_file_browser(app, win, alias_f.clone());
+                        });
+                    }
+                    // Mount remote folder via SSHFS & open in Akar File Manager
+                    {
+                        let alias_m = h.alias.clone();
+                        connect_signal(btn_mount, "clicked", move || {
+                            hide_all_menus();
+                            set_label_text(ssh_status_lbl, &format!("⏳ Mounting {}...", alias_m));
+                            gtk_widget_set_visible(ssh_status_lbl, 1);
+                            match mount_ssh_host(&alias_m, "~") {
+                                Ok(mnt) => {
+                                    set_label_text(
+                                        ssh_status_lbl,
+                                        &format!("✅ Mounted {} → Akar", alias_m),
+                                    );
+                                    open_finder_at(app, mnt);
+                                }
+                                Err(e) => {
+                                    set_label_text(ssh_status_lbl, &format!("❌ {}", e));
+                                }
+                            }
+                        });
+                    }
 
                     // Click host -> open new tab & auto-run `ssh <alias>`
                     {
@@ -1454,6 +1936,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         let mi_split_v = new_menu_item("◫", "Split Vertical", "Ctrl+Shift+D");
         let mi_split_h = new_menu_item("⬓", "Split Horizontal", "Ctrl+Shift+E");
         let mi_toggle_sb = new_menu_item("◧", "Toggle SSH Sidebar", "Ctrl+Shift+S");
+        let mi_broadcast = new_menu_item("📡", "Broadcast Command", "Ctrl+Shift+M");
         let mi_close_tab = new_menu_item("✖", "Close Tab", "Ctrl+Shift+W");
 
         gtk_box_append(menu_shell, mi_dup_win);
@@ -1463,6 +1946,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         gtk_box_append(menu_shell, mi_split_h);
         gtk_box_append(menu_shell, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
         gtk_box_append(menu_shell, mi_toggle_sb);
+        gtk_box_append(menu_shell, mi_broadcast);
         gtk_box_append(menu_shell, mi_close_tab);
 
         let mi_about_pancer = new_menu_item("🌱", "About Pancer", "");
@@ -1487,6 +1971,8 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         wire(mi_split_h, &act_split_h);
         wire(mi_toggle_sb, &act_toggle_sidebar);
         wire(btn_toggle_sb, &act_toggle_sidebar);
+        wire(mi_broadcast, &act_toggle_broadcast);
+        wire(btn_broadcast, &act_toggle_broadcast);
         wire(mi_close_tab, &act_close_tab);
         wire(btn_add_tab, &act_new_tab);
 
@@ -1504,17 +1990,24 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             let f_sv = Rc::clone(&act_split_v);
             let f_sh = Rc::clone(&act_split_h);
             let f_sb = Rc::clone(&act_toggle_sidebar);
+            let f_bc = Rc::clone(&act_toggle_broadcast);
             let f_ct = Rc::clone(&act_close_tab);
             let st_k = Rc::clone(&state);
             connect_key_pressed(win, move |keyval, mods| {
-                // Escape closes any open dropdown menu cleanly
-                if keyval == 0xff1b && any_menu_open() {
-                    hide_all_menus();
-                    let pane = st_k.try_borrow().ok().and_then(|s| s.active_pane());
-                    if let Some(p) = pane {
-                        gtk_widget_grab_focus(p.vte);
+                // Escape closes any open dropdown menu or broadcast bar cleanly
+                if keyval == 0xff1b {
+                    if any_menu_open() {
+                        hide_all_menus();
+                        let pane = st_k.try_borrow().ok().and_then(|s| s.active_pane());
+                        if let Some(p) = pane {
+                            gtk_widget_grab_focus(p.vte);
+                        }
+                        return true;
                     }
-                    return true;
+                    if gtk_widget_get_visible(broadcast_bar) != 0 {
+                        f_bc();
+                        return true;
+                    }
                 }
                 let ctrl = (mods & 4) != 0;  // GDK_CONTROL_MASK
                 let shift = (mods & 1) != 0; // GDK_SHIFT_MASK
@@ -1533,6 +2026,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                     Some('D') => { f_sv(); true }
                     Some('E') => { f_sh(); true }
                     Some('S') => { f_sb(); true }
+                    Some('M') => { f_bc(); true }
                     Some('W') => { f_ct(); true }
                     _ => false,
                 }

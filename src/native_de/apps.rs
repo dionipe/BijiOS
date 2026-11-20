@@ -197,19 +197,52 @@ pub fn home_dir() -> PathBuf {
 // 1. Akar - File Manager (BijiOS Native Liquid Glass File Manager)
 // ============================================================================
 pub fn open_finder(app: *mut GtkApplication) {
+    open_finder_at(app, home_dir());
+}
+
+fn read_sshfs_mounts() -> Vec<(String, PathBuf)> {
+    let mut mounts = Vec::new();
+    let base = home_dir().join("Mounts");
+    let base_s = base.to_string_lossy().to_string();
+    if let Ok(txt) = fs::read_to_string("/proc/mounts") {
+        for line in txt.lines() {
+            let p: Vec<&str> = line.split_whitespace().collect();
+            if p.len() >= 3 {
+                let target = p[1].replace("\\040", " ");
+                let fstype = p[2];
+                if fstype.contains("sshfs") || target.starts_with(&base_s) {
+                    let path = PathBuf::from(&target);
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("remote")
+                        .to_string();
+                    if !mounts.iter().any(|(_, mp): &(String, PathBuf)| mp == &path) {
+                        mounts.push((name, path));
+                    }
+                }
+            }
+        }
+    }
+    mounts
+}
+
+pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
     unsafe {
         let win = create_app_window(app, "📁  Akar - File Manager", 980, 620);
         let root = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
 
         // Sidebar
         let sidebar = new_box(GTK_ORIENTATION_VERTICAL, 3, &["app-sidebar"]);
-        gtk_widget_set_size_request(sidebar, 200, -1);
+        gtk_widget_set_size_request(sidebar, 210, -1);
         gtk_widget_set_hexpand(sidebar, 0);
         let sb_hdr1 = new_label("MY STORAGE", &["sidebar-section-hdr"]);
         gtk_label_set_xalign(sb_hdr1, 0.0);
         gtk_box_append(sidebar, sb_hdr1);
 
-        let cur_dir: Rc<RefCell<PathBuf>> = Rc::new(RefCell::new(home_dir()));
+        let cur_dir: Rc<RefCell<PathBuf>> = Rc::new(RefCell::new(
+            if start_dir.is_dir() { start_dir } else { home_dir() },
+        ));
 
         // Main area
         let main_col = new_box(GTK_ORIENTATION_VERTICAL, 0, &[]);
@@ -482,6 +515,71 @@ pub fn open_finder(app: *mut GtkApplication) {
                 }
             });
         }
+
+        // Remote Mounts (SSHFS from Pancer)
+        let sb_hdr3 = new_label("REMOTE MOUNTS (SSHFS)", &["sidebar-section-hdr"]);
+        gtk_label_set_xalign(sb_hdr3, 0.0);
+        gtk_box_append(sidebar, sb_hdr3);
+
+        let mounts_sb_box = new_box(GTK_ORIENTATION_VERTICAL, 3, &[]);
+        gtk_box_append(sidebar, mounts_sb_box);
+
+        let populate_mounts_sb: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
+        let pop_m_c = Rc::clone(&populate_mounts_sb);
+        {
+            let cur_dir_m = Rc::clone(&cur_dir);
+            let pop_m = Rc::clone(&populate);
+            *populate_mounts_sb.borrow_mut() = Box::new(move || {
+                clear_box_children(mounts_sb_box);
+                let mounts = read_sshfs_mounts();
+                if mounts.is_empty() {
+                    let hint = new_label("No SSH mounts yet", &["finder-meta-lbl"]);
+                    gtk_label_set_xalign(hint, 0.0);
+                    set_margins(hint, 2, 2, 8, 4);
+                    gtk_box_append(mounts_sb_box, hint);
+                    return;
+                }
+                for (name, mpath) in mounts {
+                    let row = new_box(GTK_ORIENTATION_HORIZONTAL, 2, &[]);
+                    let btn = new_left_button("🔐", &name, &["sidebar-btn"]);
+                    gtk_widget_set_hexpand(btn, 1);
+                    let btn_um = new_button("⏏", &["row-trash-btn"]);
+                    let tip_u = cstr(&format!("Unmount {}", name));
+                    gtk_widget_set_tooltip_text(btn_um, tip_u.as_ptr());
+
+                    gtk_box_append(row, btn);
+                    gtk_box_append(row, btn_um);
+                    gtk_box_append(mounts_sb_box, row);
+
+                    let mp_open = mpath.clone();
+                    let cd_o = Rc::clone(&cur_dir_m);
+                    let pp_o = Rc::clone(&pop_m);
+                    connect_signal(btn, "clicked", move || {
+                        if mp_open.exists() {
+                            *cd_o.borrow_mut() = mp_open.clone();
+                            (pp_o.borrow())();
+                        }
+                    });
+
+                    let mp_u = mpath.clone();
+                    let cd_u = Rc::clone(&cur_dir_m);
+                    let pp_u = Rc::clone(&pop_m);
+                    let pm_u = Rc::clone(&pop_m_c);
+                    connect_signal(btn_um, "clicked", move || {
+                        let mp_str = mp_u.to_string_lossy().to_string();
+                        let _ = Command::new("sh")
+                            .args(["-c", &format!("fusermount3 -u '{0}' 2>/dev/null || fusermount -u '{0}' 2>/dev/null || umount '{0}'", mp_str.replace('\'', "'\\''"))])
+                            .status();
+                        if cd_u.borrow().starts_with(&mp_u) {
+                            *cd_u.borrow_mut() = home_dir();
+                            (pp_u.borrow())();
+                        }
+                        (pm_u.borrow())();
+                    });
+                }
+            });
+        }
+        (populate_mounts_sb.borrow())();
 
         // Toolbar handlers
         {

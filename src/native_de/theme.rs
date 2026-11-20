@@ -981,6 +981,22 @@ button.pancer-sidebar-toggle:hover {
     color: #FFFFFF;
 }
 
+.pancer-broadcast-bar {
+    background-image: linear-gradient(90deg, #173D31 0%, #0E2720 100%);
+    border-bottom: 1px solid rgba(232, 163, 61, 0.55);
+    padding: 5px 10px;
+}
+
+.pancer-broadcast-badge {
+    background-color: rgba(232, 163, 61, 0.22);
+    border: 1px solid #E8A33D;
+    color: #F6C469;
+    border-radius: 999px;
+    padding: 2px 9px;
+    font-size: 10.5px;
+    font-weight: 800;
+}
+
 .pancer-tabbar {
     background-color: #091814;
     border-bottom: 1px solid rgba(127, 191, 106, 0.22);
