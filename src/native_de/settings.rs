@@ -375,6 +375,7 @@ pub fn open_system_settings(
 
         let nav_items = [
             ("dock", "🎛️", "Desktop & Dock", true),
+            ("display", "🖥️", "Displays", false),
             ("wallpaper", "🖼️", "Wallpaper", false),
         ];
         let nav_sys = [
@@ -433,6 +434,13 @@ pub fn open_system_settings(
         let dock_page = build_dock_page(Rc::clone(&handles));
         let n_dock = cstr("dock");
         gtk_stack_add_named(stack, dock_page, n_dock.as_ptr());
+
+        // ---------------------------------------------------------------------
+        // PAGE 2: Displays & Remote Desktop (VNC)
+        // ---------------------------------------------------------------------
+        let disp_page = build_display_page(Rc::clone(&handles));
+        let n_disp = cstr("display");
+        gtk_stack_add_named(stack, disp_page, n_disp.as_ptr());
 
         // ---------------------------------------------------------------------
         // PAGE 2: Wallpaper (Nature Wallpapers + Dynamic Wallpaper + Previews)
@@ -637,33 +645,122 @@ unsafe fn build_dock_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
     }
 
     gtk_box_append(page, dock_card);
+    gtk_scrolled_window_set_child(scroller, page);
+    scroller
+}
 
-    // 6. Display Resolution Card (Works with TigerVNC, x11vnc, and Physical/KVM Displays)
+// ============================================================================
+// Page 2: Displays (Hardware Resolution via xrandr) & Remote Desktop (VNC)
+// ============================================================================
+fn probe_xrandr_output() -> (String, String, Vec<String>) {
+    let mut out_name = String::new();
+    let mut cur_mode = String::new();
+    let mut modes: Vec<String> = Vec::new();
+    if let Ok(out) = Command::new("xrandr").arg("--query").output() {
+        let txt = String::from_utf8_lossy(&out.stdout);
+        let mut in_connected = false;
+        for line in txt.lines() {
+            if !line.starts_with(' ') && !line.starts_with('\t') {
+                if line.contains(" connected") && out_name.is_empty() {
+                    out_name = line.split_whitespace().next().unwrap_or("VNC-0").to_string();
+                    in_connected = true;
+                } else if in_connected {
+                    break;
+                }
+            } else if in_connected {
+                let mut parts = line.split_whitespace();
+                if let Some(m) = parts.next() {
+                    if m.contains('x') && m.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                        if line.contains('*') {
+                            cur_mode = m.to_string();
+                        }
+                        if !modes.contains(&m.to_string()) {
+                            modes.push(m.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if out_name.is_empty() {
+        out_name = "VNC-0".to_string();
+    }
+    if modes.is_empty() {
+        modes = vec![
+            "1920x1080".into(),
+            "1680x1050".into(),
+            "1600x900".into(),
+            "1440x900".into(),
+            "1366x768".into(),
+            "1280x720".into(),
+        ];
+    }
+    (out_name, cur_mode, modes)
+}
+
+fn is_systemd_active(unit: &str) -> bool {
+    Command::new("systemctl")
+        .args(["is-active", "--quiet", unit])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn read_primary_ipv4() -> String {
+    if let Ok(out) = Command::new("ip").args(["-4", "-o", "addr", "show"]).output() {
+        let txt = String::from_utf8_lossy(&out.stdout);
+        for line in txt.lines() {
+            let p: Vec<&str> = line.split_whitespace().collect();
+            if p.len() >= 4 && p[1] != "lo" {
+                return p[3].split('/').next().unwrap_or("127.0.0.1").to_string();
+            }
+        }
+    }
+    "127.0.0.1".to_string()
+}
+
+unsafe fn build_display_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
+    let scroller = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(scroller, GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_hexpand(scroller, 1);
+    let page = new_box(GTK_ORIENTATION_VERTICAL, 14, &[]);
+    set_margin_all(page, 22);
+
+    let title = new_label("Displays & Remote Desktop", &["app-heading"]);
+    gtk_label_set_xalign(title, 0.0);
+    gtk_box_append(page, title);
+
+    // =========================================================================
+    // Card 1: Hardware Display Output & Resolution (xrandr)
+    // =========================================================================
     let disp_card = new_box(GTK_ORIENTATION_VERTICAL, 10, &["app-card"]);
-    let disp_hdr = new_label("🖥️ DISPLAY & VNC RESOLUTION", &["app-section-title"]);
+    let hdr_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    let disp_hdr = new_label("🖥️ HARDWARE DISPLAY & RESOLUTION", &["app-section-title"]);
     gtk_label_set_xalign(disp_hdr, 0.0);
-    let (cw, ch) = get_x11_screen_size();
-    let disp_status = new_label(
-        &format!("Current resolution: {} × {}  •  Select a preset or enter custom hardware resolution.", cw, ch),
-        &["app-muted"],
-    );
-    gtk_label_set_xalign(disp_status, 0.0);
-    gtk_label_set_wrap(disp_status, 1);
+    gtk_widget_set_hexpand(disp_hdr, 1);
+    let btn_refresh_disp = new_button("🔄 Refresh Outputs", &["toolbar-btn"]);
+    gtk_box_append(hdr_row, disp_hdr);
+    gtk_box_append(hdr_row, btn_refresh_disp);
+    gtk_box_append(disp_card, hdr_row);
 
-    let apply_resolution = {
+    let disp_info = new_label("", &["app-muted"]);
+    gtk_label_set_xalign(disp_info, 0.0);
+    gtk_label_set_wrap(disp_info, 1);
+    gtk_box_append(disp_card, disp_info);
+
+    let res_flow = gtk_flow_box_new();
+    gtk_flow_box_set_max_children_per_line(res_flow, 4);
+    gtk_flow_box_set_min_children_per_line(res_flow, 3);
+    gtk_flow_box_set_row_spacing(res_flow, 6);
+    gtk_flow_box_set_column_spacing(res_flow, 6);
+    gtk_flow_box_set_selection_mode(res_flow, 0);
+    gtk_box_append(disp_card, res_flow);
+
+    let apply_resolution: Rc<dyn Fn(u32, u32, Rc<dyn Fn()>)> = {
         let h = Rc::clone(&handles);
-        Rc::new(move |w: u32, ht: u32| {
+        Rc::new(move |w: u32, ht: u32, on_done: Rc<dyn Fn()>| {
+            let (output, _, _) = probe_xrandr_output();
             let mode_name = format!("{}x{}", w, ht);
-            // Detect connected xrandr output (e.g. VNC-0, Virtual-1, HDMI-1)
-            let output = Command::new("sh")
-                .args(["-c", "xrandr --query | awk '/ connected/{print $1; exit}'"])
-                .output()
-                .ok()
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "VNC-0".to_string());
-
             let script = format!(
                 "if ! xrandr --output {out} --mode {m} 2>/dev/null; then \
                    LINE=$(cvt {w} {ht} 60 | awk '/Modeline/{{$1=\"\"; sub(/^ /, \"\"); print}}'); \
@@ -679,63 +776,91 @@ unsafe fn build_dock_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
             );
             let _ = Command::new("sh").args(["-c", &script]).status();
             let desk = h.desktop_win;
-            timeout_add_ms(120, move || {
+            timeout_add_ms(140, move || {
                 set_x11_desktop_window(desk);
-                let (nw, nh) = get_x11_screen_size();
-                set_label_text(
-                    disp_status,
-                    &format!("✅ Resolution applied: {} × {} (output: {})", nw, nh, output),
-                );
+                on_done();
                 false
             });
         })
     };
 
-    let res_flow = gtk_flow_box_new();
-    gtk_flow_box_set_max_children_per_line(res_flow, 4);
-    gtk_flow_box_set_min_children_per_line(res_flow, 3);
-    gtk_flow_box_set_row_spacing(res_flow, 6);
-    gtk_flow_box_set_column_spacing(res_flow, 6);
-    gtk_flow_box_set_selection_mode(res_flow, 0);
-
-    let res_presets: [(u32, u32, &str); 8] = [
-        (1280, 720, "1280 × 720 (HD)"),
-        (1366, 768, "1366 × 768"),
-        (1440, 900, "1440 × 900"),
-        (1600, 900, "1600 × 900"),
-        (1680, 1050, "1680 × 1050"),
-        (1920, 1080, "1920 × 1080 (FHD)"),
-        (1920, 1200, "1920 × 1200"),
-        (2560, 1440, "2560 × 1440 (QHD)"),
-    ];
-    for (rw, rh, lbl) in res_presets {
-        let is_cur = cw == rw as i32 && ch == rh as i32;
-        let b = new_button(lbl, if is_cur { &["seg-btn-active"] } else { &["seg-btn"] });
-        gtk_flow_box_append(res_flow, b);
+    let populate_modes: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
+    let pop_clone = Rc::clone(&populate_modes);
+    {
         let ar = Rc::clone(&apply_resolution);
-        connect_signal(b, "clicked", move || ar(rw, rh));
+        *populate_modes.borrow_mut() = Box::new(move || {
+            let (out_name, cur_mode, modes) = probe_xrandr_output();
+            let (cw, ch) = get_x11_screen_size();
+            let active_str = if !cur_mode.is_empty() {
+                cur_mode.clone()
+            } else {
+                format!("{}x{}", cw, ch)
+            };
+            set_label_text(
+                disp_info,
+                &format!(
+                    "Detected Output: {} (Connected)  •  Active Resolution: {}  •  {} hardware mode(s) available",
+                    out_name,
+                    active_str.replace('x', " × "),
+                    modes.len()
+                ),
+            );
+
+            clear_flow_children(res_flow);
+            for mode in modes.into_iter().take(16) {
+                let is_cur = mode == active_str;
+                let pretty = mode.replace('x', " × ");
+                let b = new_button(&pretty, if is_cur { &["seg-btn-active"] } else { &["seg-btn"] });
+                gtk_flow_box_append(res_flow, b);
+
+                if let Some((ws, hs)) = mode.split_once('x') {
+                    if let (Ok(w), Ok(ht)) = (ws.parse::<u32>(), hs.parse::<u32>()) {
+                        let ar_c = Rc::clone(&ar);
+                        let pc = Rc::clone(&pop_clone);
+                        connect_signal(b, "clicked", move || {
+                            let pc2 = Rc::clone(&pc);
+                            ar_c(w, ht, Rc::new(move || (pc2.borrow())()));
+                        });
+                    }
+                }
+            }
+        });
     }
+
+    {
+        let pc = Rc::clone(&populate_modes);
+        connect_signal(btn_refresh_disp, "clicked", move || {
+            (pc.borrow())();
+        });
+    }
+
+    // Custom Hardware Resolution Row
+    let custom_hdr = new_label("CUSTOM RESOLUTION", &["kv-key"]);
+    gtk_label_set_xalign(custom_hdr, 0.0);
+    gtk_box_append(disp_card, custom_hdr);
 
     let custom_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
     let w_in = gtk_entry_new();
     let ph_w = cstr("Width (e.g. 1920)");
     gtk_entry_set_placeholder_text(w_in, ph_w.as_ptr());
-    gtk_widget_set_size_request(w_in, 130, -1);
+    gtk_widget_set_size_request(w_in, 136, -1);
     let x_lbl = new_label("×", &["kv-key"]);
     let h_in = gtk_entry_new();
     let ph_h = cstr("Height (e.g. 1080)");
     gtk_entry_set_placeholder_text(h_in, ph_h.as_ptr());
-    gtk_widget_set_size_request(h_in, 130, -1);
+    gtk_widget_set_size_request(h_in, 136, -1);
     let btn_custom_res = new_button("Apply Custom", &["primary-btn"]);
     {
         let ar = Rc::clone(&apply_resolution);
+        let pc = Rc::clone(&populate_modes);
         connect_signal(btn_custom_res, "clicked", move || {
             let pw = get_entry_text(w_in).trim().parse::<u32>().unwrap_or(0);
             let ph = get_entry_text(h_in).trim().parse::<u32>().unwrap_or(0);
             if (640..=7680).contains(&pw) && (480..=4320).contains(&ph) {
-                ar(pw, ph);
+                let pc2 = Rc::clone(&pc);
+                ar(pw, ph, Rc::new(move || (pc2.borrow())()));
             } else {
-                set_label_text(disp_status, "❌ Enter valid resolution (e.g. 1920 × 1080).");
+                set_label_text(disp_info, "❌ Enter a valid resolution between 640×480 and 7680×4320.");
             }
         });
     }
@@ -743,13 +868,167 @@ unsafe fn build_dock_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
     gtk_box_append(custom_row, x_lbl);
     gtk_box_append(custom_row, h_in);
     gtk_box_append(custom_row, btn_custom_res);
-
-    gtk_box_append(disp_card, disp_hdr);
-    gtk_box_append(disp_card, disp_status);
-    gtk_box_append(disp_card, res_flow);
     gtk_box_append(disp_card, custom_row);
     gtk_box_append(page, disp_card);
 
+    (populate_modes.borrow())();
+
+    // =========================================================================
+    // Card 2: Remote Desktop (VNC Servers Enable / Disable & Password)
+    // =========================================================================
+    let vnc_card = new_box(GTK_ORIENTATION_VERTICAL, 12, &["app-card"]);
+    let vnc_hdr = new_label("📡 REMOTE DESKTOP (VNC SERVERS)", &["app-section-title"]);
+    gtk_label_set_xalign(vnc_hdr, 0.0);
+    let host_ip = read_primary_ipv4();
+    let vnc_status = new_label(
+        &format!("Host IPv4: {}  •  Toggle installed VNC services on or off below.", host_ip),
+        &["app-muted"],
+    );
+    gtk_label_set_xalign(vnc_status, 0.0);
+    gtk_label_set_wrap(vnc_status, 1);
+    gtk_box_append(vnc_card, vnc_hdr);
+    gtk_box_append(vnc_card, vnc_status);
+
+    let add_vnc_service_row = |unit: &'static str, title_txt: &str, desc_txt: &str, port: u16| {
+        let row = new_box(GTK_ORIENTATION_HORIZONTAL, 12, &["act-proc-row"]);
+        let col = new_box(GTK_ORIENTATION_VERTICAL, 2, &[]);
+        gtk_widget_set_hexpand(col, 1);
+
+        let top_r = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+        let t_lbl = new_label(title_txt, &["act-proc-name"]);
+        gtk_label_set_xalign(t_lbl, 0.0);
+        let active_now = is_systemd_active(unit);
+        let badge = new_label(
+            if active_now { "Active" } else { "Stopped" },
+            if active_now { &["act-state-run"] } else { &["act-state-sleep"] },
+        );
+        gtk_box_append(top_r, t_lbl);
+        gtk_box_append(top_r, badge);
+
+        let sub = new_label(
+            &format!("{}  •  Connect: {}:{}", desc_txt, host_ip, port),
+            &["finder-meta-lbl"],
+        );
+        gtk_label_set_xalign(sub, 0.0);
+        gtk_box_append(col, top_r);
+        gtk_box_append(col, sub);
+
+        let btn_restart = new_button("🔄 Restart", &["toolbar-btn"]);
+        gtk_widget_set_valign(btn_restart, GTK_ALIGN_CENTER);
+
+        let sw = gtk_switch_new();
+        gtk_widget_set_valign(sw, GTK_ALIGN_CENTER);
+        gtk_switch_set_active(sw, if active_now { 1 } else { 0 });
+
+        let update_badge = move |is_on: bool| {
+            remove_css(badge, "act-state-run");
+            remove_css(badge, "act-state-sleep");
+            if is_on {
+                add_css(badge, "act-state-run");
+                set_label_text(badge, "Active");
+            } else {
+                add_css(badge, "act-state-sleep");
+                set_label_text(badge, "Stopped");
+            }
+        };
+
+        connect_notify(sw, "notify::active", move || {
+            let want_on = gtk_switch_get_active(sw) != 0;
+            let cmd = if want_on {
+                format!("systemctl enable --now {}", unit)
+            } else {
+                format!("systemctl disable --now {}", unit)
+            };
+            if run_pkexec_sh(&cmd) {
+                let real_on = is_systemd_active(unit);
+                update_badge(real_on);
+                set_label_text(
+                    vnc_status,
+                    &format!(
+                        "✅ {} is now {}.",
+                        unit,
+                        if real_on { "ENABLED & RUNNING" } else { "DISABLED & STOPPED" }
+                    ),
+                );
+            } else {
+                let real_on = is_systemd_active(unit);
+                update_badge(real_on);
+                set_label_text(vnc_status, &format!("❌ Failed to toggle {} (authentication cancelled).", unit));
+            }
+        });
+
+        connect_signal(btn_restart, "clicked", move || {
+            let cmd = format!("systemctl restart {}", unit);
+            if run_pkexec_sh(&cmd) {
+                let real_on = is_systemd_active(unit);
+                update_badge(real_on);
+                gtk_switch_set_active(sw, if real_on { 1 } else { 0 });
+                set_label_text(vnc_status, &format!("✅ Restarted {}.", unit));
+            } else {
+                set_label_text(vnc_status, &format!("❌ Failed to restart {}.", unit));
+            }
+        });
+
+        gtk_box_append(row, col);
+        gtk_box_append(row, btn_restart);
+        gtk_box_append(row, sw);
+        gtk_box_append(vnc_card, row);
+    };
+
+    add_vnc_service_row(
+        "bijios-tigervnc.service",
+        "TigerVNC Server (Dynamic Auto-Resize)",
+        "Virtual Desktop :1 (RFB ExtendedDesktopSize)",
+        5901,
+    );
+    add_vnc_service_row(
+        "x11vnc.service",
+        "X11VNC Server (Live Console Mirror)",
+        "Mirrors physical/console Display :0",
+        5900,
+    );
+
+    // Update VNC Password Row
+    let pw_hdr = new_label("VNC ACCESS PASSWORD (MAX 8 CHARS)", &["kv-key"]);
+    gtk_label_set_xalign(pw_hdr, 0.0);
+    gtk_box_append(vnc_card, pw_hdr);
+
+    let pw_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    let vnc_pw_in = gtk_entry_new();
+    gtk_widget_set_hexpand(vnc_pw_in, 1);
+    gtk_entry_set_visibility(vnc_pw_in, 0);
+    let ph_vpw = cstr("New VNC password (6–8 characters)");
+    gtk_entry_set_placeholder_text(vnc_pw_in, ph_vpw.as_ptr());
+    let btn_vnc_pw = new_button("🔑 Update VNC Password", &["primary-btn"]);
+    connect_signal(btn_vnc_pw, "clicked", move || {
+        let pw = get_entry_text(vnc_pw_in);
+        if pw.len() < 4 || pw.len() > 8 {
+            set_label_text(vnc_status, "❌ VNC password must be 4 to 8 characters.");
+            return;
+        }
+        let user = std::env::var("USER").unwrap_or_else(|_| "dionipe".to_string());
+        let qpw = shell_quote(&pw);
+        let qusr = shell_quote(&user);
+        let script = format!(
+            "mkdir -p /home/{u}/.vnc && printf '%s\\n' {p} | tigervncpasswd -f > /home/{u}/.vnc/passwd && chmod 600 /home/{u}/.vnc/passwd && chown {u}:{u} /home/{u}/.vnc/passwd; \
+             x11vnc -storepasswd {p} /etc/x11vnc.passwd && chmod 600 /etc/x11vnc.passwd; \
+             systemctl is-active --quiet bijios-tigervnc.service && systemctl restart bijios-tigervnc.service || true; \
+             systemctl is-active --quiet x11vnc.service && systemctl restart x11vnc.service || true",
+            u = qusr.trim_matches('\''),
+            p = qpw
+        );
+        if run_pkexec_sh(&script) {
+            set_entry_text(vnc_pw_in, "");
+            set_label_text(vnc_status, "✅ VNC password updated for TigerVNC & X11VNC.");
+        } else {
+            set_label_text(vnc_status, "❌ Failed to update VNC password.");
+        }
+    });
+    gtk_box_append(pw_row, vnc_pw_in);
+    gtk_box_append(pw_row, btn_vnc_pw);
+    gtk_box_append(vnc_card, pw_row);
+
+    gtk_box_append(page, vnc_card);
     gtk_scrolled_window_set_child(scroller, page);
     scroller
 }
