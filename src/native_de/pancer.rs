@@ -314,13 +314,24 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         gtk_box_append(menubar, btn_shell);
         gtk_box_append(root, menubar);
 
+        // Transparent click-outside backdrop placed UNDER the 3 dropdown menus
+        let menu_backdrop = gtk_button_new();
+        add_css(menu_backdrop, "pancer-menu-backdrop");
+        gtk_widget_set_hexpand(menu_backdrop, 1);
+        gtk_widget_set_vexpand(menu_backdrop, 1);
+        gtk_widget_set_halign(menu_backdrop, GTK_ALIGN_FILL);
+        gtk_widget_set_valign(menu_backdrop, GTK_ALIGN_FILL);
+        set_margins(menu_backdrop, 26, 0, 0, 0);
+        gtk_widget_set_visible(menu_backdrop, 0);
+        gtk_overlay_add_overlay(overlay, menu_backdrop);
+
         // In-Window Dropdown Menus (Zero Black X11 Popups via GtkOverlay)
         let make_dropdown = |margin_start: i32| -> *mut GtkWidget {
             let panel = new_box(GTK_ORIENTATION_VERTICAL, 2, &["pancer-dropdown"]);
             gtk_widget_set_halign(panel, GTK_ALIGN_START);
             gtk_widget_set_valign(panel, GTK_ALIGN_START);
             set_margins(panel, 28, 0, margin_start, 0);
-            gtk_widget_set_size_request(panel, 190, -1);
+            gtk_widget_set_size_request(panel, 248, -1);
             gtk_widget_set_visible(panel, 0);
             gtk_overlay_add_overlay(overlay, panel);
             panel
@@ -330,7 +341,14 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         let menu_edit = make_dropdown(54);
         let menu_shell = make_dropdown(100);
 
+        let any_menu_open = move || -> bool {
+            gtk_widget_get_visible(menu_file) != 0
+                || gtk_widget_get_visible(menu_edit) != 0
+                || gtk_widget_get_visible(menu_shell) != 0
+        };
+
         let hide_all_menus = move || {
+            gtk_widget_set_visible(menu_backdrop, 0);
             gtk_widget_set_visible(menu_file, 0);
             gtk_widget_set_visible(menu_edit, 0);
             gtk_widget_set_visible(menu_shell, 0);
@@ -340,6 +358,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             let vis = gtk_widget_get_visible(menu_file) != 0;
             hide_all_menus();
             if !vis {
+                gtk_widget_set_visible(menu_backdrop, 1);
                 gtk_widget_set_visible(menu_file, 1);
             }
         });
@@ -347,6 +366,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             let vis = gtk_widget_get_visible(menu_edit) != 0;
             hide_all_menus();
             if !vis {
+                gtk_widget_set_visible(menu_backdrop, 1);
                 gtk_widget_set_visible(menu_edit, 1);
             }
         });
@@ -354,6 +374,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             let vis = gtk_widget_get_visible(menu_shell) != 0;
             hide_all_menus();
             if !vis {
+                gtk_widget_set_visible(menu_backdrop, 1);
                 gtk_widget_set_visible(menu_shell, 1);
             }
         });
@@ -364,7 +385,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         let tabbar = new_box(GTK_ORIENTATION_HORIZONTAL, 5, &["pancer-tabbar"]);
         let tabs_box = new_box(GTK_ORIENTATION_HORIZONTAL, 4, &[]);
         let btn_add_tab = new_button("+", &["pancer-add-tab"]);
-        let tip_add = cstr("New Tab");
+        let tip_add = cstr("New Tab (Ctrl+Shift+T)");
         gtk_widget_set_tooltip_text(btn_add_tab, tip_add.as_ptr());
 
         gtk_box_append(tabbar, tabs_box);
@@ -372,13 +393,14 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         gtk_box_append(root, tabbar);
 
         // ---------------------------------------------------------------------
-        // 3. Terminal Tabs Stack
+        // 3. Terminal Tabs Stack & Lifecycle Guard
         // ---------------------------------------------------------------------
         let stack = gtk_stack_new();
         gtk_widget_set_hexpand(stack, 1);
         gtk_widget_set_vexpand(stack, 1);
         gtk_box_append(root, stack);
 
+        let alive = Rc::new(Cell::new(true));
         let state = Rc::new(RefCell::new(PancerState {
             next_id: 1,
             active_tab_id: 0,
@@ -386,10 +408,39 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         }));
         let local_host = Rc::new(local_hostname());
 
+        {
+            let a = Rc::clone(&alive);
+            let st_d = Rc::clone(&state);
+            connect_signal(win, "destroy", move || {
+                a.set(false);
+                if let Ok(mut s) = st_d.try_borrow_mut() {
+                    s.tabs.clear();
+                }
+            });
+        }
+
+        // Clicking anywhere outside an open dropdown dismisses it and restores terminal focus
+        {
+            let st_bg = Rc::clone(&state);
+            let a_bg = Rc::clone(&alive);
+            connect_signal(menu_backdrop, "clicked", move || {
+                hide_all_menus();
+                if a_bg.get() {
+                    if let Some(p) = st_bg.borrow().active_pane() {
+                        gtk_widget_grab_focus(p.vte);
+                    }
+                }
+            });
+        }
+
         // Helper: switch active tab
         let select_tab: Rc<dyn Fn(u32)> = {
             let st = Rc::clone(&state);
+            let a = Rc::clone(&alive);
             Rc::new(move |tab_id: u32| {
+                if !a.get() {
+                    return;
+                }
                 let mut s = st.borrow_mut();
                 s.active_tab_id = tab_id;
                 let mut target_stack = String::new();
@@ -418,17 +469,25 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             })
         };
 
-        // Helper: close a tab by id (closes window if last tab)
+        // Helper: close a tab by id safely (closes window if last tab, never touches destroyed widgets)
         let close_tab: Rc<dyn Fn(u32)> = {
             let st = Rc::clone(&state);
             let sel = Rc::clone(&select_tab);
+            let a = Rc::clone(&alive);
             Rc::new(move |tab_id: u32| {
+                if !a.get() {
+                    return;
+                }
                 let next_id_opt = {
                     let mut s = st.borrow_mut();
                     if let Some(idx) = s.tabs.iter().position(|t| t.id == tab_id) {
                         let removed = s.tabs.remove(idx);
-                        gtk_box_remove(tabs_box, removed.tab_pill);
-                        gtk_stack_remove(stack, removed.container);
+                        if gtk_widget_get_parent(removed.tab_pill) == tabs_box {
+                            gtk_box_remove(tabs_box, removed.tab_pill);
+                        }
+                        if gtk_widget_get_parent(removed.container) == stack {
+                            gtk_stack_remove(stack, removed.container);
+                        }
                     }
                     if s.tabs.is_empty() {
                         None
@@ -439,6 +498,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                 if let Some(nid) = next_id_opt {
                     sel(nid);
                 } else {
+                    a.set(false);
                     gtk_window_close(win);
                 }
             })
@@ -450,7 +510,11 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             let sel = Rc::clone(&select_tab);
             let cls = Rc::clone(&close_tab);
             let lh = Rc::clone(&local_host);
+            let a = Rc::clone(&alive);
             Rc::new(move |dir: PathBuf| {
+                if !a.get() {
+                    return;
+                }
                 let tab_id = {
                     let mut s = st.borrow_mut();
                     let id = s.next_id;
@@ -494,15 +558,19 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                 {
                     let cls_e = Rc::clone(&cls);
                     let st_e = Rc::clone(&st);
+                    let a_e = Rc::clone(&a);
                     connect_notify(pane.vte, "child-exited", move || {
-                        // Only close entire tab if it has a single pane
+                        if !a_e.get() {
+                            return;
+                        }
+                        // Only close entire tab if it still exists and has a single pane
                         let single = st_e
                             .borrow()
                             .tabs
                             .iter()
                             .find(|t| t.id == tab_id)
                             .map(|t| t.panes.len() <= 1)
-                            .unwrap_or(true);
+                            .unwrap_or(false);
                         if single {
                             cls_e(tab_id);
                         }
@@ -525,7 +593,11 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         // Helper: split active tab vertically (side-by-side) or horizontally (top-bottom)
         let split_active: Rc<dyn Fn(c_int)> = {
             let st = Rc::clone(&state);
+            let a = Rc::clone(&alive);
             Rc::new(move |orientation: c_int| {
+                if !a.get() {
+                    return;
+                }
                 let mut s = st.borrow_mut();
                 let dir = s
                     .active_pane()
@@ -564,72 +636,136 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             })
         };
 
-        // ---------------------------------------------------------------------
-        // Populate File / Edit / Shell Dropdown Menu Items
-        // ---------------------------------------------------------------------
-        // File menu
-        let mi_new_win = new_left_button("🪟", "New Window", &["pancer-menu-item"]);
-        let mi_new_tab = new_left_button("➕", "New Tab", &["pancer-menu-item"]);
-        gtk_box_append(menu_file, mi_new_win);
-        gtk_box_append(menu_file, mi_new_tab);
+        // Helper: menu item with icon, label, and right-aligned hotkey hint
+        let new_menu_item = |icon: &str, text: &str, accel: &str| -> *mut GtkWidget {
+            let btn = gtk_button_new();
+            add_css(btn, "pancer-menu-item");
+            let row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+            gtk_widget_set_hexpand(row, 1);
+            let ic = new_label(icon, &[]);
+            let lbl = new_label(text, &[]);
+            gtk_label_set_xalign(lbl, 0.0);
+            gtk_widget_set_hexpand(lbl, 1);
+            let acc = new_label(accel, &["pancer-accel"]);
+            gtk_label_set_xalign(acc, 1.0);
+            gtk_box_append(row, ic);
+            gtk_box_append(row, lbl);
+            gtk_box_append(row, acc);
+            gtk_button_set_child(btn, row);
+            btn
+        };
 
-        connect_signal(mi_new_win, "clicked", move || {
+        // Shared action closures (used by both menu buttons AND keyboard hotkeys!)
+        let act_new_win: Rc<dyn Fn()> = Rc::new(move || {
             hide_all_menus();
             open_pancer_with_dir(app, None);
         });
-        {
+        let act_new_tab: Rc<dyn Fn()> = {
             let at = Rc::clone(&add_tab);
-            connect_signal(mi_new_tab, "clicked", move || {
+            Rc::new(move || {
                 hide_all_menus();
                 at(home_dir());
-            });
-        }
-
-        // Edit menu
-        let mi_copy = new_left_button("📋", "Copy", &["pancer-menu-item"]);
-        let mi_paste = new_left_button("📥", "Paste", &["pancer-menu-item"]);
-        let mi_clear = new_left_button("🧹", "Clear", &["pancer-menu-item"]);
-        gtk_box_append(menu_edit, mi_copy);
-        gtk_box_append(menu_edit, mi_paste);
-        gtk_box_append(menu_edit, mi_clear);
-
-        {
+            })
+        };
+        let act_copy: Rc<dyn Fn()> = {
             let st = Rc::clone(&state);
-            connect_signal(mi_copy, "clicked", move || {
+            Rc::new(move || {
                 hide_all_menus();
                 if let Some(p) = st.borrow().active_pane() {
                     vte_terminal_copy_clipboard_format(p.vte, 1);
                     gtk_widget_grab_focus(p.vte);
                 }
-            });
-        }
-        {
+            })
+        };
+        let act_paste: Rc<dyn Fn()> = {
             let st = Rc::clone(&state);
-            connect_signal(mi_paste, "clicked", move || {
+            Rc::new(move || {
                 hide_all_menus();
                 if let Some(p) = st.borrow().active_pane() {
                     vte_terminal_paste_clipboard(p.vte);
                     gtk_widget_grab_focus(p.vte);
                 }
-            });
-        }
-        {
+            })
+        };
+        let act_clear: Rc<dyn Fn()> = {
             let st = Rc::clone(&state);
-            connect_signal(mi_clear, "clicked", move || {
+            Rc::new(move || {
                 hide_all_menus();
                 if let Some(p) = st.borrow().active_pane() {
                     vte_terminal_reset(p.vte, 1, 1);
                     gtk_widget_grab_focus(p.vte);
                 }
-            });
-        }
+            })
+        };
+        let act_dup_win: Rc<dyn Fn()> = {
+            let st = Rc::clone(&state);
+            Rc::new(move || {
+                hide_all_menus();
+                let dir = st
+                    .borrow()
+                    .active_pane()
+                    .map(|p| read_pid_cwd(p.pid.get()))
+                    .unwrap_or_else(home_dir);
+                open_pancer_with_dir(app, Some(dir));
+            })
+        };
+        let act_dup_tab: Rc<dyn Fn()> = {
+            let st = Rc::clone(&state);
+            let at = Rc::clone(&add_tab);
+            Rc::new(move || {
+                hide_all_menus();
+                let dir = st
+                    .borrow()
+                    .active_pane()
+                    .map(|p| read_pid_cwd(p.pid.get()))
+                    .unwrap_or_else(home_dir);
+                at(dir);
+            })
+        };
+        let act_split_v: Rc<dyn Fn()> = {
+            let sp = Rc::clone(&split_active);
+            Rc::new(move || {
+                hide_all_menus();
+                sp(GTK_ORIENTATION_HORIZONTAL);
+            })
+        };
+        let act_split_h: Rc<dyn Fn()> = {
+            let sp = Rc::clone(&split_active);
+            Rc::new(move || {
+                hide_all_menus();
+                sp(GTK_ORIENTATION_VERTICAL);
+            })
+        };
+        let act_close_tab: Rc<dyn Fn()> = {
+            let st = Rc::clone(&state);
+            let cls = Rc::clone(&close_tab);
+            Rc::new(move || {
+                hide_all_menus();
+                let aid = st.borrow().active_tab_id;
+                cls(aid);
+            })
+        };
 
-        // Shell menu
-        let mi_dup_win = new_left_button("🪟", "Duplicate Window", &["pancer-menu-item"]);
-        let mi_dup_tab = new_left_button("📑", "Duplicate Tab", &["pancer-menu-item"]);
-        let mi_split_v = new_left_button("◫", "Split Vertical", &["pancer-menu-item"]);
-        let mi_split_h = new_left_button("⬓", "Split Horizontal", &["pancer-menu-item"]);
-        let mi_close_tab = new_left_button("✖", "Close Tab", &["pancer-menu-item"]);
+        // ---------------------------------------------------------------------
+        // Populate File / Edit / Shell Dropdown Menu Items (with Hotkeys!)
+        // ---------------------------------------------------------------------
+        let mi_new_win = new_menu_item("🪟", "New Window", "Ctrl+Shift+N");
+        let mi_new_tab = new_menu_item("➕", "New Tab", "Ctrl+Shift+T");
+        gtk_box_append(menu_file, mi_new_win);
+        gtk_box_append(menu_file, mi_new_tab);
+
+        let mi_copy = new_menu_item("📋", "Copy", "Ctrl+Shift+C");
+        let mi_paste = new_menu_item("📥", "Paste", "Ctrl+Shift+V");
+        let mi_clear = new_menu_item("🧹", "Clear", "Ctrl+Shift+K");
+        gtk_box_append(menu_edit, mi_copy);
+        gtk_box_append(menu_edit, mi_paste);
+        gtk_box_append(menu_edit, mi_clear);
+
+        let mi_dup_win = new_menu_item("🪟", "Duplicate Window", "Ctrl+Shift+U");
+        let mi_dup_tab = new_menu_item("📑", "Duplicate Tab", "Ctrl+Shift+B");
+        let mi_split_v = new_menu_item("◫", "Split Vertical", "Ctrl+Shift+D");
+        let mi_split_h = new_menu_item("⬓", "Split Horizontal", "Ctrl+Shift+E");
+        let mi_close_tab = new_menu_item("✖", "Close Tab", "Ctrl+Shift+W");
 
         gtk_box_append(menu_shell, mi_dup_win);
         gtk_box_append(menu_shell, mi_dup_tab);
@@ -639,69 +775,65 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         gtk_box_append(menu_shell, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
         gtk_box_append(menu_shell, mi_close_tab);
 
-        {
-            let st = Rc::clone(&state);
-            connect_signal(mi_dup_win, "clicked", move || {
-                hide_all_menus();
-                let dir = st
-                    .borrow()
-                    .active_pane()
-                    .map(|p| read_pid_cwd(p.pid.get()))
-                    .unwrap_or_else(home_dir);
-                open_pancer_with_dir(app, Some(dir));
-            });
-        }
-        {
-            let st = Rc::clone(&state);
-            let at = Rc::clone(&add_tab);
-            connect_signal(mi_dup_tab, "clicked", move || {
-                hide_all_menus();
-                let dir = st
-                    .borrow()
-                    .active_pane()
-                    .map(|p| read_pid_cwd(p.pid.get()))
-                    .unwrap_or_else(home_dir);
-                at(dir);
-            });
-        }
-        {
-            let sp = Rc::clone(&split_active);
-            connect_signal(mi_split_v, "clicked", move || {
-                hide_all_menus();
-                sp(GTK_ORIENTATION_HORIZONTAL); // side-by-side vertical split divider
-            });
-        }
-        {
-            let sp = Rc::clone(&split_active);
-            connect_signal(mi_split_h, "clicked", move || {
-                hide_all_menus();
-                sp(GTK_ORIENTATION_VERTICAL); // top-bottom horizontal split divider
-            });
-        }
-        {
-            let st = Rc::clone(&state);
-            let cls = Rc::clone(&close_tab);
-            connect_signal(mi_close_tab, "clicked", move || {
-                hide_all_menus();
-                let aid = st.borrow().active_tab_id;
-                cls(aid);
-            });
-        }
+        let wire = |btn: *mut GtkWidget, f: &Rc<dyn Fn()>| {
+            let fc = Rc::clone(f);
+            connect_signal(btn, "clicked", move || fc());
+        };
+        wire(mi_new_win, &act_new_win);
+        wire(mi_new_tab, &act_new_tab);
+        wire(mi_copy, &act_copy);
+        wire(mi_paste, &act_paste);
+        wire(mi_clear, &act_clear);
+        wire(mi_dup_win, &act_dup_win);
+        wire(mi_dup_tab, &act_dup_tab);
+        wire(mi_split_v, &act_split_v);
+        wire(mi_split_h, &act_split_h);
+        wire(mi_close_tab, &act_close_tab);
+        wire(btn_add_tab, &act_new_tab);
 
-        // "+" button in tab bar -> New Tab
+        // ---------------------------------------------------------------------
+        // Global Capture-Phase Hotkeys (Ctrl+Shift+<Key> + Escape)
+        // ---------------------------------------------------------------------
         {
-            let at = Rc::clone(&add_tab);
-            connect_signal(btn_add_tab, "clicked", move || {
-                hide_all_menus();
-                at(home_dir());
-            });
-        }
-
-        let alive = Rc::new(Cell::new(true));
-        {
-            let a = Rc::clone(&alive);
-            connect_signal(win, "destroy", move || {
-                a.set(false);
+            let f_nw = Rc::clone(&act_new_win);
+            let f_nt = Rc::clone(&act_new_tab);
+            let f_cp = Rc::clone(&act_copy);
+            let f_ps = Rc::clone(&act_paste);
+            let f_cl = Rc::clone(&act_clear);
+            let f_dw = Rc::clone(&act_dup_win);
+            let f_dt = Rc::clone(&act_dup_tab);
+            let f_sv = Rc::clone(&act_split_v);
+            let f_sh = Rc::clone(&act_split_h);
+            let f_ct = Rc::clone(&act_close_tab);
+            let st_k = Rc::clone(&state);
+            connect_key_pressed(win, move |keyval, mods| {
+                // Escape closes any open dropdown menu cleanly
+                if keyval == 0xff1b && any_menu_open() {
+                    hide_all_menus();
+                    if let Some(p) = st_k.borrow().active_pane() {
+                        gtk_widget_grab_focus(p.vte);
+                    }
+                    return true;
+                }
+                let ctrl = (mods & 4) != 0;  // GDK_CONTROL_MASK
+                let shift = (mods & 1) != 0; // GDK_SHIFT_MASK
+                if !(ctrl && shift) {
+                    return false;
+                }
+                let ch = char::from_u32(keyval).map(|c| c.to_ascii_uppercase());
+                match ch {
+                    Some('N') => { f_nw(); true }
+                    Some('T') => { f_nt(); true }
+                    Some('C') => { f_cp(); true }
+                    Some('V') => { f_ps(); true }
+                    Some('K') => { f_cl(); true }
+                    Some('U') => { f_dw(); true }
+                    Some('B') => { f_dt(); true }
+                    Some('D') => { f_sv(); true }
+                    Some('E') => { f_sh(); true }
+                    Some('W') => { f_ct(); true }
+                    _ => false,
+                }
             });
         }
 

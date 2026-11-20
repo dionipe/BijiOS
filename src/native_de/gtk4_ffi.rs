@@ -158,6 +158,11 @@ extern "C" {
     pub fn gtk_widget_set_opacity(widget: *mut GtkWidget, opacity: c_double);
     pub fn gtk_widget_set_overflow(widget: *mut GtkWidget, overflow: c_int);
     pub fn gtk_widget_get_parent(widget: *mut GtkWidget) -> *mut GtkWidget;
+    pub fn gtk_widget_add_controller(widget: *mut GtkWidget, controller: GPointer);
+
+    // GtkEventControllerKey (Keyboard shortcuts / Hotkeys)
+    pub fn gtk_event_controller_key_new() -> GPointer;
+    pub fn gtk_event_controller_set_propagation_phase(controller: GPointer, phase: c_int);
 
     // GtkOrientable (switch Dock between horizontal & vertical live)
     pub fn gtk_orientable_set_orientation(orientable: *mut GtkWidget, orientation: c_int);
@@ -755,6 +760,47 @@ pub unsafe fn connect_notify<F: FnMut() + 'static>(widget: *mut GtkWidget, signa
         destroy_void as GPointer,
         0,
     );
+}
+
+extern "C" fn trampoline_key_pressed(
+    _controller: GPointer,
+    keyval: c_uint,
+    _keycode: c_uint,
+    state: c_uint,
+    data: GPointer,
+) -> c_int {
+    let cb: &mut Box<dyn FnMut(u32, u32) -> bool> =
+        unsafe { &mut *(data as *mut Box<dyn FnMut(u32, u32) -> bool>) };
+    if cb(keyval, state) { 1 } else { 0 }
+}
+
+extern "C" fn destroy_key_pressed(data: GPointer, _closure: GPointer) {
+    if !data.is_null() {
+        unsafe {
+            let _ = Box::from_raw(data as *mut Box<dyn FnMut(u32, u32) -> bool>);
+        }
+    }
+}
+
+/// Attach a capture-phase key-pressed handler to any widget (returns true to consume key)
+pub unsafe fn connect_key_pressed<F: FnMut(u32, u32) -> bool + 'static>(
+    widget: *mut GtkWidget,
+    f: F,
+) {
+    let ctrl = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(ctrl, 1); // GTK_PHASE_CAPTURE
+    let boxed: Box<Box<dyn FnMut(u32, u32) -> bool>> = Box::new(Box::new(f));
+    let raw = Box::into_raw(boxed) as GPointer;
+    let sig = cstr("key-pressed");
+    g_signal_connect_data(
+        ctrl,
+        sig.as_ptr(),
+        trampoline_key_pressed as GPointer,
+        raw,
+        destroy_key_pressed as GPointer,
+        0,
+    );
+    gtk_widget_add_controller(widget, ctrl);
 }
 
 extern "C" fn trampoline_timer(data: GPointer) -> c_int {

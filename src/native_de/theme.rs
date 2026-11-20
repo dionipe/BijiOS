@@ -871,6 +871,26 @@ button.pancer-menu-item:hover {
     color: #FFFFFF;
 }
 
+.pancer-accel {
+    font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: rgba(244, 235, 217, 0.58);
+}
+
+button.pancer-menu-backdrop {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    border-radius: 0px;
+    box-shadow: none;
+    padding: 0px;
+}
+
+button.pancer-menu-backdrop:hover {
+    background-color: transparent;
+}
+
 .pancer-tabbar {
     background-color: #091814;
     border-bottom: 1px solid rgba(127, 191, 106, 0.22);
