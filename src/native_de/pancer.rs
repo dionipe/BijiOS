@@ -426,8 +426,13 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             connect_signal(menu_backdrop, "clicked", move || {
                 hide_all_menus();
                 if a_bg.get() {
-                    if let Some(p) = st_bg.borrow().active_pane() {
-                        gtk_widget_grab_focus(p.vte);
+                    let vte_opt = st_bg
+                        .try_borrow()
+                        .ok()
+                        .and_then(|s| s.active_pane())
+                        .map(|p| p.vte);
+                    if let Some(vte) = vte_opt {
+                        gtk_widget_grab_focus(vte);
                     }
                 }
             });
@@ -441,24 +446,26 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                 if !a.get() {
                     return;
                 }
-                let mut s = st.borrow_mut();
-                s.active_tab_id = tab_id;
-                let mut target_stack = String::new();
-                let mut focus_vte: *mut GtkWidget = std::ptr::null_mut();
-                for t in &s.tabs {
-                    if t.id == tab_id {
-                        remove_css(t.tab_pill, "pancer-tab");
-                        add_css(t.tab_pill, "pancer-tab-active");
-                        target_stack = t.stack_name.clone();
-                        if let Some(p) = t.panes.first() {
-                            focus_vte = p.vte;
+                let (target_stack, focus_vte) = {
+                    let Ok(mut s) = st.try_borrow_mut() else { return; };
+                    s.active_tab_id = tab_id;
+                    let mut target = String::new();
+                    let mut fv: *mut GtkWidget = std::ptr::null_mut();
+                    for t in &s.tabs {
+                        if t.id == tab_id {
+                            remove_css(t.tab_pill, "pancer-tab");
+                            add_css(t.tab_pill, "pancer-tab-active");
+                            target = t.stack_name.clone();
+                            if let Some(p) = t.panes.first() {
+                                fv = p.vte;
+                            }
+                        } else {
+                            remove_css(t.tab_pill, "pancer-tab-active");
+                            add_css(t.tab_pill, "pancer-tab");
                         }
-                    } else {
-                        remove_css(t.tab_pill, "pancer-tab-active");
-                        add_css(t.tab_pill, "pancer-tab");
                     }
-                }
-                drop(s);
+                    (target, fv)
+                };
                 if !target_stack.is_empty() {
                     let c = cstr(&target_stack);
                     gtk_stack_set_visible_child_name(stack, c.as_ptr());
@@ -469,7 +476,8 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             })
         };
 
-        // Helper: close a tab by id safely (closes window if last tab, never touches destroyed widgets)
+        // Helper: close a tab by id safely (drops RefCell borrow BEFORE gtk_stack_remove so
+        // synchronous VTE child-exited signals can NEVER cause a re-entrant RefCell panic!)
         let close_tab: Rc<dyn Fn(u32)> = {
             let st = Rc::clone(&state);
             let sel = Rc::clone(&select_tab);
@@ -478,23 +486,24 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                 if !a.get() {
                     return;
                 }
-                let next_id_opt = {
-                    let mut s = st.borrow_mut();
-                    if let Some(idx) = s.tabs.iter().position(|t| t.id == tab_id) {
-                        let removed = s.tabs.remove(idx);
-                        if gtk_widget_get_parent(removed.tab_pill) == tabs_box {
-                            gtk_box_remove(tabs_box, removed.tab_pill);
-                        }
-                        if gtk_widget_get_parent(removed.container) == stack {
-                            gtk_stack_remove(stack, removed.container);
-                        }
-                    }
-                    if s.tabs.is_empty() {
-                        None
-                    } else {
-                        Some(s.tabs[0].id)
-                    }
+                let (removed_opt, next_id_opt) = {
+                    let Ok(mut s) = st.try_borrow_mut() else { return; };
+                    let removed = s
+                        .tabs
+                        .iter()
+                        .position(|t| t.id == tab_id)
+                        .map(|idx| s.tabs.remove(idx));
+                    let next_id = s.tabs.first().map(|t| t.id);
+                    (removed, next_id)
                 };
+                if let Some(removed) = removed_opt {
+                    if gtk_widget_get_parent(removed.tab_pill) == tabs_box {
+                        gtk_box_remove(tabs_box, removed.tab_pill);
+                    }
+                    if gtk_widget_get_parent(removed.container) == stack {
+                        gtk_stack_remove(stack, removed.container);
+                    }
+                }
                 if let Some(nid) = next_id_opt {
                     sel(nid);
                 } else {
@@ -516,7 +525,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                     return;
                 }
                 let tab_id = {
-                    let mut s = st.borrow_mut();
+                    let Ok(mut s) = st.try_borrow_mut() else { return; };
                     let id = s.next_id;
                     s.next_id += 1;
                     id
@@ -563,13 +572,16 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                         if !a_e.get() {
                             return;
                         }
-                        // Only close entire tab if it still exists and has a single pane
+                        // Use try_borrow() so re-entrant teardown never panics across FFI!
                         let single = st_e
-                            .borrow()
-                            .tabs
-                            .iter()
-                            .find(|t| t.id == tab_id)
-                            .map(|t| t.panes.len() <= 1)
+                            .try_borrow()
+                            .ok()
+                            .and_then(|s| {
+                                s.tabs
+                                    .iter()
+                                    .find(|t| t.id == tab_id)
+                                    .map(|t| t.panes.len() <= 1)
+                            })
                             .unwrap_or(false);
                         if single {
                             cls_e(tab_id);
@@ -577,14 +589,16 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                     });
                 }
 
-                st.borrow_mut().tabs.push(PancerTab {
-                    id: tab_id,
-                    stack_name,
-                    container,
-                    panes: vec![pane],
-                    tab_pill,
-                    tab_btn,
-                });
+                if let Ok(mut s) = st.try_borrow_mut() {
+                    s.tabs.push(PancerTab {
+                        id: tab_id,
+                        stack_name,
+                        container,
+                        panes: vec![pane],
+                        tab_pill,
+                        tab_btn,
+                    });
+                }
 
                 sel(tab_id);
             })
@@ -598,22 +612,23 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                 if !a.get() {
                     return;
                 }
-                let mut s = st.borrow_mut();
-                let dir = s
-                    .active_pane()
-                    .map(|p| read_pid_cwd(p.pid.get()))
-                    .unwrap_or_else(home_dir);
-                let Some(tab) = s.active_tab_mut() else {
-                    return;
+                let (dir, container, tab_id) = {
+                    let Ok(s) = st.try_borrow() else { return; };
+                    let d = s
+                        .active_pane()
+                        .map(|p| read_pid_cwd(p.pid.get()))
+                        .unwrap_or_else(home_dir);
+                    let Some(tab) = s.active_tab() else { return; };
+                    (d, tab.container, tab.id)
                 };
-                let existing = gtk_widget_get_first_child(tab.container);
+                let existing = gtk_widget_get_first_child(container);
                 if existing.is_null() {
                     return;
                 }
 
                 // Ref existing child BEFORE removing from container so GTK4 never frees it!
                 g_object_ref(existing as GPointer);
-                gtk_box_remove(tab.container, existing);
+                gtk_box_remove(container, existing);
 
                 let paned = gtk_paned_new(orientation);
                 gtk_widget_set_hexpand(paned, 1);
@@ -630,8 +645,12 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                 gtk_paned_set_shrink_end_child(paned, 0);
 
                 g_object_unref(existing as GPointer);
-                gtk_box_append(tab.container, paned);
-                tab.panes.push(new_pane);
+                gtk_box_append(container, paned);
+                if let Ok(mut s) = st.try_borrow_mut() {
+                    if let Some(tab) = s.tabs.iter_mut().find(|t| t.id == tab_id) {
+                        tab.panes.push(new_pane);
+                    }
+                }
                 gtk_widget_grab_focus(new_vte);
             })
         };
@@ -671,7 +690,8 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             let st = Rc::clone(&state);
             Rc::new(move || {
                 hide_all_menus();
-                if let Some(p) = st.borrow().active_pane() {
+                let pane = st.try_borrow().ok().and_then(|s| s.active_pane());
+                if let Some(p) = pane {
                     vte_terminal_copy_clipboard_format(p.vte, 1);
                     gtk_widget_grab_focus(p.vte);
                 }
@@ -681,7 +701,8 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             let st = Rc::clone(&state);
             Rc::new(move || {
                 hide_all_menus();
-                if let Some(p) = st.borrow().active_pane() {
+                let pane = st.try_borrow().ok().and_then(|s| s.active_pane());
+                if let Some(p) = pane {
                     vte_terminal_paste_clipboard(p.vte);
                     gtk_widget_grab_focus(p.vte);
                 }
@@ -691,7 +712,8 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             let st = Rc::clone(&state);
             Rc::new(move || {
                 hide_all_menus();
-                if let Some(p) = st.borrow().active_pane() {
+                let pane = st.try_borrow().ok().and_then(|s| s.active_pane());
+                if let Some(p) = pane {
                     vte_terminal_reset(p.vte, 1, 1);
                     gtk_widget_grab_focus(p.vte);
                 }
@@ -702,8 +724,9 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             Rc::new(move || {
                 hide_all_menus();
                 let dir = st
-                    .borrow()
-                    .active_pane()
+                    .try_borrow()
+                    .ok()
+                    .and_then(|s| s.active_pane())
                     .map(|p| read_pid_cwd(p.pid.get()))
                     .unwrap_or_else(home_dir);
                 open_pancer_with_dir(app, Some(dir));
@@ -715,8 +738,9 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             Rc::new(move || {
                 hide_all_menus();
                 let dir = st
-                    .borrow()
-                    .active_pane()
+                    .try_borrow()
+                    .ok()
+                    .and_then(|s| s.active_pane())
                     .map(|p| read_pid_cwd(p.pid.get()))
                     .unwrap_or_else(home_dir);
                 at(dir);
@@ -741,8 +765,11 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             let cls = Rc::clone(&close_tab);
             Rc::new(move || {
                 hide_all_menus();
-                let aid = st.borrow().active_tab_id;
-                cls(aid);
+                if let Ok(s) = st.try_borrow() {
+                    let aid = s.active_tab_id;
+                    drop(s);
+                    cls(aid);
+                }
             })
         };
 
@@ -810,7 +837,8 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                 // Escape closes any open dropdown menu cleanly
                 if keyval == 0xff1b && any_menu_open() {
                     hide_all_menus();
-                    if let Some(p) = st_k.borrow().active_pane() {
+                    let pane = st_k.try_borrow().ok().and_then(|s| s.active_pane());
+                    if let Some(p) = pane {
                         gtk_widget_grab_focus(p.vte);
                     }
                     return true;
@@ -846,7 +874,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
                 if !a.get() {
                     return false;
                 }
-                let s = st.borrow();
+                let Ok(s) = st.try_borrow() else { return true; };
                 for tab in &s.tabs {
                     if let Some(p) = tab.panes.first() {
                         let label = detect_pane_host(p.pid.get(), p.vte, &lh);
