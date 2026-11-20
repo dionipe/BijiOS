@@ -771,13 +771,32 @@ unsafe fn build_display_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
     gtk_label_set_wrap(disp_info, 1);
     gtk_box_append(disp_card, disp_info);
 
-    let res_flow = gtk_flow_box_new();
-    gtk_flow_box_set_max_children_per_line(res_flow, 4);
-    gtk_flow_box_set_min_children_per_line(res_flow, 3);
-    gtk_flow_box_set_row_spacing(res_flow, 6);
-    gtk_flow_box_set_column_spacing(res_flow, 6);
-    gtk_flow_box_set_selection_mode(res_flow, 0);
-    gtk_box_append(disp_card, res_flow);
+    // Compact Resolution Dropdown Selector (zero black X11 popup artifacts)
+    let dd_row = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &[]);
+    let dd_lbl = new_label("Resolution", &["finder-name-btn"]);
+    gtk_label_set_xalign(dd_lbl, 0.0);
+    gtk_widget_set_size_request(dd_lbl, 110, -1);
+
+    let dd_toggle_btn = new_button("1920 × 1080   ▾", &["toolbar-btn"]);
+    gtk_widget_set_hexpand(dd_toggle_btn, 1);
+    gtk_box_append(dd_row, dd_lbl);
+    gtk_box_append(dd_row, dd_toggle_btn);
+    gtk_box_append(disp_card, dd_row);
+
+    let dd_scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(dd_scroll, GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request(dd_scroll, -1, 180);
+    add_css(dd_scroll, "bijios-dropdown-menu");
+    gtk_widget_set_visible(dd_scroll, 0);
+
+    let dd_list = new_box(GTK_ORIENTATION_VERTICAL, 2, &[]);
+    gtk_scrolled_window_set_child(dd_scroll, dd_list);
+    gtk_box_append(disp_card, dd_scroll);
+
+    connect_signal(dd_toggle_btn, "clicked", move || {
+        let vis = gtk_widget_get_visible(dd_scroll) != 0;
+        gtk_widget_set_visible(dd_scroll, if vis { 0 } else { 1 });
+    });
 
     let apply_resolution: Rc<dyn Fn(u32, u32, Rc<dyn Fn()>)> = {
         let h = Rc::clone(&handles);
@@ -819,28 +838,41 @@ unsafe fn build_display_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
             } else {
                 format!("{}x{}", cw, ch)
             };
+            let pretty_active = active_str.replace('x', " × ");
             set_label_text(
                 disp_info,
                 &format!(
-                    "Detected Output: {} (Connected)  •  Active Resolution: {}  •  {} hardware mode(s) available",
+                    "Detected Output: {} (Connected)  •  Active: {}  •  {} mode(s) available",
                     out_name,
-                    active_str.replace('x', " × "),
+                    pretty_active,
                     modes.len()
                 ),
             );
+            let dd_txt = cstr(&format!("🖥️  {}   ▾", pretty_active));
+            gtk_button_set_label(dd_toggle_btn, dd_txt.as_ptr());
 
-            clear_flow_children(res_flow);
-            for mode in modes.into_iter().take(16) {
+            clear_box_children(dd_list);
+            for mode in modes {
                 let is_cur = mode == active_str;
                 let pretty = mode.replace('x', " × ");
-                let b = new_button(&pretty, if is_cur { &["seg-btn-active"] } else { &["seg-btn"] });
-                gtk_flow_box_append(res_flow, b);
+                let item_lbl = if is_cur {
+                    format!("✓  {} (Active)", pretty)
+                } else {
+                    format!("    {}", pretty)
+                };
+                let b = new_left_button(
+                    "",
+                    &item_lbl,
+                    if is_cur { &["sidebar-btn-active"] } else { &["sidebar-btn"] },
+                );
+                gtk_box_append(dd_list, b);
 
                 if let Some((ws, hs)) = mode.split_once('x') {
                     if let (Ok(w), Ok(ht)) = (ws.parse::<u32>(), hs.parse::<u32>()) {
                         let ar_c = Rc::clone(&ar);
                         let pc = Rc::clone(&pop_clone);
                         connect_signal(b, "clicked", move || {
+                            gtk_widget_set_visible(dd_scroll, 0);
                             let pc2 = Rc::clone(&pc);
                             ar_c(w, ht, Rc::new(move || (pc2.borrow())()));
                         });
