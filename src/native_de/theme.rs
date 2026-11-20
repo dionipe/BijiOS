@@ -411,44 +411,13 @@ button.dock-btn:hover {
    ------------------------------------------------------------------------- */
 window.app-window {
     background-image: none;
-    background-color: #102B23;
-    color: #12332A;
-    border: 2px solid #0B1F19;
-    border-radius: 14px;
-    padding: 3px 4px 4px 4px;
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
-}
-
-window.app-window > box,
-window.app-window > overlay,
-window.app-window > scrolledwindow {
     background-color: #FFFFFF;
-    border-bottom-left-radius: 10px;
-    border-bottom-right-radius: 10px;
-}
-
-window.app-window.maximized,
-window.app-window.fullscreen {
+    color: #12332A;
     border: none;
-    padding: 0px;
     border-radius: 0px;
+    padding: 0px;
+    margin: 0px;
     box-shadow: none;
-}
-
-window.app-window.maximized > box,
-window.app-window.maximized > overlay,
-window.app-window.maximized > scrolledwindow,
-window.app-window.fullscreen > box,
-window.app-window.fullscreen > overlay,
-window.app-window.fullscreen > scrolledwindow {
-    border-bottom-left-radius: 0px;
-    border-bottom-right-radius: 0px;
-}
-
-window.app-window.maximized .mac-titlebar,
-window.app-window.fullscreen .mac-titlebar {
-    border-top-left-radius: 0px;
-    border-top-right-radius: 0px;
 }
 
 /* Custom macOS Liquid Glass Titlebar (Ultra-Compact, Minimal Top Padding, Fully Rounded) */

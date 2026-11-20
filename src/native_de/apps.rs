@@ -150,117 +150,34 @@ pub fn create_app_window(app: *mut GtkApplication, title: &str, width: i32, heig
         let t = cstr(title);
         gtk_window_set_title(win, t.as_ptr());
         gtk_window_set_default_size(win, width, height);
+        gtk_window_set_decorated(win, 1);
         gtk_window_set_resizable(win, 1);
         add_css(win, "app-window");
 
-        // Custom macOS Liquid Glass Titlebar (Traffic Lights + Integrated Tab Pill — ekspektasi/toolbar.png)
-        let handle = gtk_window_handle_new();
-        let tb = gtk_center_box_new();
-        add_css(tb, "mac-titlebar");
-
-        let start_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
-        gtk_widget_set_valign(start_row, GTK_ALIGN_CENTER);
-
-        let lights = new_box(GTK_ORIENTATION_HORIZONTAL, 7, &[]);
-        gtk_widget_set_valign(lights, GTK_ALIGN_CENTER);
-        let btn_close = new_button("", &["traffic-btn", "traffic-close"]);
-        let btn_min = new_button("", &["traffic-btn", "traffic-min"]);
-        let btn_max = new_button("", &["traffic-btn", "traffic-max"]);
-        let tc = cstr("Close");
-        let tm = cstr("Minimize");
-        let tx = cstr("Maximize / Restore");
-        gtk_widget_set_tooltip_text(btn_close, tc.as_ptr());
-        gtk_widget_set_tooltip_text(btn_min, tm.as_ptr());
-        gtk_widget_set_tooltip_text(btn_max, tx.as_ptr());
-
-        let win_alive = Rc::new(std::cell::Cell::new(true));
-        {
-            let wa = Rc::clone(&win_alive);
-            connect_signal(win, "destroy", move || {
-                wa.set(false);
-            });
-        }
-
-        connect_signal(btn_close, "clicked", move || gtk_window_close(win));
-        {
-            let wa = Rc::clone(&win_alive);
-            connect_signal(btn_min, "clicked", move || {
-                let effect = crate::native_de::get_minimize_effect();
-                let steps: i32 = if effect == "genie" { 5 } else { 3 };
-                let step_counter = Rc::new(RefCell::new(0i32));
-                let sc = Rc::clone(&step_counter);
-                let wa2 = Rc::clone(&wa);
-                timeout_add_ms(22, move || {
-                    if !wa2.get() {
-                        return false;
-                    }
-                    let mut cur = sc.borrow_mut();
-                    *cur += 1;
-                    if *cur <= steps {
-                        let frac = 1.0 - (*cur as f64 / (steps as f64 + 0.5));
-                        gtk_widget_set_opacity(win, frac.max(0.15));
-                        true
-                    } else {
-                        gtk_window_minimize(win);
-                        gtk_widget_set_opacity(win, 1.0);
-                        false
-                    }
-                });
-            });
-        }
-        connect_signal(btn_max, "clicked", move || {
-            if gtk_window_is_maximized(win) != 0 {
-                gtk_window_unmaximize(win);
-            } else {
-                gtk_window_maximize(win);
-            }
-        });
-
         // Animate opening applications (smooth fade-in when enabled)
         if crate::native_de::get_animate_opening() {
-            gtk_widget_set_opacity(win, 0.25);
+            let win_alive = Rc::new(std::cell::Cell::new(true));
+            {
+                let wa = Rc::clone(&win_alive);
+                connect_signal(win, "destroy", move || {
+                    wa.set(false);
+                });
+            }
+            gtk_widget_set_opacity(win, 0.35);
             let step = Rc::new(RefCell::new(1i32));
             let st = Rc::clone(&step);
             let wa = Rc::clone(&win_alive);
-            timeout_add_ms(20, move || {
+            timeout_add_ms(18, move || {
                 if !wa.get() {
                     return false;
                 }
                 let mut c = st.borrow_mut();
                 *c += 1;
-                let op = (*c as f64 * 0.2).min(1.0);
+                let op = (0.35 + *c as f64 * 0.22).min(1.0);
                 gtk_widget_set_opacity(win, op);
                 op < 1.0
             });
         }
-
-        gtk_box_append(lights, btn_close);
-        gtk_box_append(lights, btn_min);
-        gtk_box_append(lights, btn_max);
-
-        let pill_btn = new_button("▾", &["mac-title-pill-btn"]);
-        let tip_p = cstr("Toggle Maximize");
-        gtk_widget_set_tooltip_text(pill_btn, tip_p.as_ptr());
-        connect_signal(pill_btn, "clicked", move || {
-            if gtk_window_is_maximized(win) != 0 {
-                gtk_window_unmaximize(win);
-            } else {
-                gtk_window_maximize(win);
-            }
-        });
-
-        let tab_pill = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &["mac-title-tab"]);
-        let title_lbl = new_label(title, &["mac-titlebar-title"]);
-        gtk_box_append(tab_pill, title_lbl);
-
-        gtk_box_append(start_row, lights);
-        gtk_box_append(start_row, pill_btn);
-        gtk_box_append(start_row, tab_pill);
-
-        gtk_center_box_set_start_widget(tb, start_row);
-
-        gtk_window_handle_set_child(handle, tb);
-        gtk_window_set_titlebar(win, handle);
 
         win
     }

@@ -1,11 +1,11 @@
 # BijiOS 1.0.0 "Padi" — Liquid Glass Openbox-3 Theme
 # Matches BijiOS Native GTK4 macOS Titlebar (Hutan Malam + Traffic Lights CIML)
 
-border.width: 3
+border.width: 2
 border.color: #102B23
 padding.width: 8
 padding.height: 5
-window.handle.width: 5
+window.handle.width: 4
 window.active.handle.bg: flat solid
 window.active.handle.bg.color: #102B23
 window.active.grip.bg: flat solid
