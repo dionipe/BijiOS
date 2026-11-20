@@ -6,7 +6,7 @@ use crate::docx::DocxEngine;
 use crate::native_de::gtk4_ffi::*;
 use crate::xlsx::XlsxEngine;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -370,6 +370,222 @@ fn open_item_in_app(app: *mut GtkApplication, p_open: &PathBuf) {
     }
 }
 
+fn is_system_root_path(path: &std::path::Path) -> bool {
+    !path.starts_with(home_dir())
+}
+
+unsafe fn open_root_warning_dialog(
+    app: *mut GtkApplication,
+    parent_win: *mut GtkWidget,
+    target_dir: &std::path::Path,
+    on_proceed: Box<dyn Fn()>,
+) {
+    let dlg = create_app_window(app, "⚠️ System Root Folder Warning", 460, 215);
+    gtk_window_set_resizable(dlg, 0);
+    gtk_window_set_modal(dlg, 1);
+    gtk_window_set_transient_for(dlg, parent_win);
+
+    let root = new_box(GTK_ORIENTATION_VERTICAL, 12, &[]);
+    set_margin_all(root, 18);
+
+    let hdr = new_label("⚠️ Protected System Directory", &["app-heading"]);
+    gtk_label_set_xalign(hdr, 0.0);
+
+    let msg = new_label(
+        &format!(
+            "You are about to access a protected Linux system folder ({}).\nModifying, moving, or deleting system files can make BijiOS unstable or unbootable. Please proceed with caution.",
+            target_dir.display()
+        ),
+        &["kv-val"],
+    );
+    gtk_label_set_xalign(msg, 0.0);
+    gtk_label_set_wrap(msg, 1);
+
+    let btns = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    gtk_widget_set_halign(btns, GTK_ALIGN_END);
+    let btn_cancel = new_button("Cancel", &["toolbar-btn"]);
+    let btn_ok = new_button("⚠️ Proceed Anyway", &["primary-btn"]);
+    gtk_box_append(btns, btn_cancel);
+    gtk_box_append(btns, btn_ok);
+
+    gtk_box_append(root, hdr);
+    gtk_box_append(root, msg);
+    gtk_box_append(root, btns);
+
+    connect_signal(btn_cancel, "clicked", move || gtk_window_close(dlg));
+    connect_signal(btn_ok, "clicked", move || {
+        on_proceed();
+        gtk_window_close(dlg);
+    });
+
+    gtk_window_set_child(dlg, root);
+    gtk_window_present(dlg);
+}
+
+unsafe fn open_about_akar(app: *mut GtkApplication, parent_win: *mut GtkWidget) {
+    let dlg = create_app_window(app, "📁 About Akar", 580, 560);
+    gtk_window_set_resizable(dlg, 0);
+    gtk_window_set_modal(dlg, 1);
+    gtk_window_set_transient_for(dlg, parent_win);
+
+    let scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(scroll, GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    let root = new_box(GTK_ORIENTATION_VERTICAL, 12, &[]);
+    set_margin_all(root, 20);
+
+    // Header Card
+    let hdr_card = new_box(GTK_ORIENTATION_HORIZONTAL, 16, &["app-card"]);
+    let logo = new_logo_image(58, true);
+    gtk_widget_set_valign(logo, GTK_ALIGN_CENTER);
+    let tcol = new_box(GTK_ORIENTATION_VERTICAL, 3, &[]);
+    gtk_widget_set_hexpand(tcol, 1);
+    gtk_widget_set_valign(tcol, GTK_ALIGN_CENTER);
+    let title = new_label("Akar — BijiOS Native File Manager", &["app-heading"]);
+    gtk_label_set_xalign(title, 0.0);
+    let sub = new_label(
+        "Version 1.0.0 (BijiOS \"Padi\")  •  Pure Rust + Native GTK4",
+        &["app-muted"],
+    );
+    gtk_label_set_xalign(sub, 0.0);
+    gtk_box_append(tcol, title);
+    gtk_box_append(tcol, sub);
+    gtk_box_append(hdr_card, logo);
+    gtk_box_append(hdr_card, tcol);
+    gtk_box_append(root, hdr_card);
+
+    // Specifications Card
+    let spec_card = new_box(GTK_ORIENTATION_VERTICAL, 6, &["app-card"]);
+    let s_hdr = new_label("📋 SPECIFICATIONS", &["app-section-title"]);
+    gtk_label_set_xalign(s_hdr, 0.0);
+    gtk_box_append(spec_card, s_hdr);
+
+    let specs = [
+        ("Application", "Akar — Sovereign Liquid Glass File Manager"),
+        ("Desktop Suite", "BijiOS Desktop v1.0.0 (Codename \"Padi\")"),
+        ("Engine", "100% Pure Rust + Native GTK4 (Zero Chromium)"),
+        ("View Modes", "List View, Expandable Tree View & Sidebar Folder Tree"),
+        ("Remote Storage", "SSHFS Mounts & Direct Integration with Pancer"),
+        ("System Safety", "Protected System Root (/) Warning & Banner"),
+    ];
+    for (k, v) in specs {
+        let r = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &[]);
+        let kl = new_label(k, &["kv-key"]);
+        gtk_label_set_xalign(kl, 0.0);
+        gtk_widget_set_size_request(kl, 128, -1);
+        let vl = new_label(v, &["kv-val"]);
+        gtk_label_set_xalign(vl, 0.0);
+        gtk_widget_set_hexpand(vl, 1);
+        gtk_box_append(r, kl);
+        gtk_box_append(r, vl);
+        gtk_box_append(spec_card, r);
+    }
+    gtk_box_append(root, spec_card);
+
+    // Keyboard Shortcuts Card
+    let hk_card = new_box(GTK_ORIENTATION_VERTICAL, 6, &["app-card"]);
+    let h_hdr = new_label("⌨️ KEYBOARD SHORTCUTS", &["app-section-title"]);
+    gtk_label_set_xalign(h_hdr, 0.0);
+    gtk_box_append(hk_card, h_hdr);
+
+    let hk_grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(hk_grid, 4);
+    gtk_grid_set_column_spacing(hk_grid, 16);
+    gtk_grid_set_column_homogeneous(hk_grid, 1);
+
+    let shortcuts: [(&str, &str); 8] = [
+        ("Ctrl+T", "New Tab"),
+        ("Ctrl+Shift+N", "New Folder"),
+        ("Ctrl+C / X", "Copy / Move (Cut)"),
+        ("Ctrl+V", "Paste into Folder"),
+        ("F2", "Rename Selected"),
+        ("Del", "Delete Selected"),
+        ("Right-Click", "Context Menu"),
+        ("Esc", "Close Menu"),
+    ];
+    for (i, (key, desc)) in shortcuts.iter().enumerate() {
+        let r = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+        let kl = new_label(key, &["act-proc-mono"]);
+        gtk_label_set_xalign(kl, 0.0);
+        gtk_widget_set_size_request(kl, 108, -1);
+        let dl = new_label(desc, &["kv-val"]);
+        gtk_label_set_xalign(dl, 0.0);
+        gtk_box_append(r, kl);
+        gtk_box_append(r, dl);
+        gtk_grid_attach(hk_grid, r, (i % 2) as i32, (i / 2) as i32, 1, 1);
+    }
+    gtk_box_append(hk_card, hk_grid);
+    gtk_box_append(root, hk_card);
+
+    // Open-Source Links Card
+    let cred_card = new_box(GTK_ORIENTATION_VERTICAL, 6, &["app-card"]);
+    let c_hdr = new_label("📜 OPEN-SOURCE COMPONENTS", &["app-section-title"]);
+    gtk_label_set_xalign(c_hdr, 0.0);
+    gtk_box_append(cred_card, c_hdr);
+
+    let c_pills = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+    gtk_box_append(
+        c_pills,
+        new_link_button("BijiOS Project ↗", "https://github.com/dionipe/BijiOS", &["link-pill"]),
+    );
+    gtk_box_append(
+        c_pills,
+        new_link_button("GTK4 Toolkit ↗", "https://www.gtk.org", &["link-pill"]),
+    );
+    gtk_box_append(
+        c_pills,
+        new_link_button("SSHFS / FUSE ↗", "https://github.com/libfuse/sshfs", &["link-pill"]),
+    );
+    gtk_box_append(cred_card, c_pills);
+    gtk_box_append(root, cred_card);
+
+    let close_row = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+    gtk_widget_set_halign(close_row, GTK_ALIGN_END);
+    let btn_close = new_button("Close", &["primary-btn"]);
+    connect_signal(btn_close, "clicked", move || gtk_window_close(dlg));
+    gtk_box_append(close_row, btn_close);
+    gtk_box_append(root, close_row);
+
+    gtk_scrolled_window_set_child(scroll, root);
+    gtk_window_set_child(dlg, scroll);
+    gtk_window_present(dlg);
+}
+
+fn collect_tree_entries(
+    dir: &std::path::Path,
+    depth: usize,
+    expanded: &HashSet<PathBuf>,
+    out: &mut Vec<(String, PathBuf, bool, u64, usize)>,
+) {
+    if depth > 4 || out.len() >= 350 {
+        return;
+    }
+    let mut entries: Vec<(String, PathBuf, bool, u64)> = Vec::new();
+    if let Ok(rd) = fs::read_dir(dir) {
+        for ent in rd.flatten() {
+            let p = ent.path();
+            let name = ent.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                continue;
+            }
+            let meta = ent.metadata().ok();
+            let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            entries.push((name, p, is_dir, size));
+        }
+    }
+    entries.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+    for (name, path, is_dir, size) in entries {
+        if out.len() >= 350 {
+            break;
+        }
+        let exp = is_dir && expanded.contains(&path);
+        out.push((name, path.clone(), is_dir, size, depth));
+        if exp {
+            collect_tree_entries(&path, depth + 1, expanded, out);
+        }
+    }
+}
+
 pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
     unsafe {
         let win = create_app_window(app, "📁  Akar - File Manager", 1000, 640);
@@ -380,11 +596,12 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
         gtk_overlay_set_child(overlay, win_col);
 
         // ---------------------------------------------------------------------
-        // 1. Akar Menu Bar (File | Edit                    [Clipboard Badge])
+        // 1. Akar Menu Bar (File | Edit | Help             [Clipboard Badge])
         // ---------------------------------------------------------------------
         let menubar = new_box(GTK_ORIENTATION_HORIZONTAL, 4, &["akar-menubar"]);
         let btn_file = new_button("File", &["akar-menu-btn"]);
         let btn_edit = new_button("Edit", &["akar-menu-btn"]);
+        let btn_help = new_button("Help", &["akar-menu-btn"]);
         let mb_spacer = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
         gtk_widget_set_hexpand(mb_spacer, 1);
         let clip_badge = new_label("", &["akar-clip-badge"]);
@@ -392,6 +609,7 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
 
         gtk_box_append(menubar, btn_file);
         gtk_box_append(menubar, btn_edit);
+        gtk_box_append(menubar, btn_help);
         gtk_box_append(menubar, mb_spacer);
         gtk_box_append(menubar, clip_badge);
         gtk_box_append(win_col, menubar);
@@ -419,11 +637,13 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
 
         let menu_file = make_dropdown(8);
         let menu_edit = make_dropdown(54);
+        let menu_help = make_dropdown(100);
         let ctx_menu = make_dropdown(0);
 
         let any_menu_open = move || -> bool {
             gtk_widget_get_visible(menu_file) != 0
                 || gtk_widget_get_visible(menu_edit) != 0
+                || gtk_widget_get_visible(menu_help) != 0
                 || gtk_widget_get_visible(ctx_menu) != 0
         };
 
@@ -431,6 +651,7 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
             gtk_widget_set_visible(menu_backdrop, 0);
             gtk_widget_set_visible(menu_file, 0);
             gtk_widget_set_visible(menu_edit, 0);
+            gtk_widget_set_visible(menu_help, 0);
             gtk_widget_set_visible(ctx_menu, 0);
         };
 
@@ -451,6 +672,14 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
             if !vis {
                 gtk_widget_set_visible(menu_backdrop, 1);
                 gtk_widget_set_visible(menu_edit, 1);
+            }
+        });
+        connect_signal(btn_help, "clicked", move || {
+            let vis = gtk_widget_get_visible(menu_help) != 0;
+            hide_all_menus();
+            if !vis {
+                gtk_widget_set_visible(menu_backdrop, 1);
+                gtk_widget_set_visible(menu_help, 1);
             }
         });
 
@@ -548,6 +777,10 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
         gtk_widget_set_size_request(path_entry, 260, -1);
         set_entry_text(path_entry, &cur_dir.borrow().to_string_lossy());
 
+        let btn_tree_mode = new_button("🌳 Tree", &["toolbar-btn"]);
+        let tip_tm = cstr("Switch between List View and Expandable Tree View");
+        gtk_widget_set_tooltip_text(btn_tree_mode, tip_tm.as_ptr());
+
         let btn_new_folder = new_button("+ Folder", &["toolbar-btn"]);
         let tip_nf = cstr("Create New Folder (Ctrl+Shift+N)");
         gtk_widget_set_tooltip_text(btn_new_folder, tip_nf.as_ptr());
@@ -562,10 +795,25 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
 
         gtk_box_append(toolbar, btn_up);
         gtk_box_append(toolbar, path_entry);
+        gtk_box_append(toolbar, btn_tree_mode);
         gtk_box_append(toolbar, btn_new_folder);
         gtk_box_append(toolbar, btn_new_doc);
         gtk_box_append(toolbar, btn_refresh);
         gtk_box_append(main_col, toolbar);
+
+        // System Root Warning Banner (visible whenever browsing outside $HOME)
+        let root_banner = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &["akar-root-banner"]);
+        let root_banner_lbl = new_label(
+            "⚠️ System Root Folder (/) — Protected Linux OS directory. Avoid modifying or deleting critical system files.",
+            &["akar-root-banner-lbl"],
+        );
+        gtk_label_set_xalign(root_banner_lbl, 0.0);
+        gtk_widget_set_hexpand(root_banner_lbl, 1);
+        let btn_go_home = new_button("🏠 Go Home", &["toolbar-btn"]);
+        gtk_box_append(root_banner, root_banner_lbl);
+        gtk_box_append(root_banner, btn_go_home);
+        gtk_widget_set_visible(root_banner, 0);
+        gtk_box_append(main_col, root_banner);
 
         // Column Header Row (Name | Size | Kind)
         let col_hdr = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &["finder-col-header"]);
@@ -604,9 +852,76 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
         gtk_center_box_set_end_widget(status_bar, status_right);
         gtk_box_append(main_col, status_bar);
 
-        // Forward-declared closures for populate & tab bar rebuild
+        // Forward-declared closures for populate, tab bar rebuild, & sidebar tree
         let populate: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
         let rebuild_tabs: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
+        let populate_tree_sb: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
+
+        let tree_mode: Rc<std::cell::Cell<bool>> = Rc::new(std::cell::Cell::new(false));
+        let main_expanded: Rc<RefCell<HashSet<PathBuf>>> = Rc::new(RefCell::new(HashSet::new()));
+        let mut init_sb_exp = HashSet::new();
+        init_sb_exp.insert(home_dir());
+        let sb_expanded: Rc<RefCell<HashSet<PathBuf>>> = Rc::new(RefCell::new(init_sb_exp));
+        let root_warn_ack: Rc<std::cell::Cell<bool>> = Rc::new(std::cell::Cell::new(false));
+
+        // Centralized navigation with System Root (/) protection warning
+        let navigate_to: Rc<dyn Fn(PathBuf)> = {
+            let cd = Rc::clone(&cur_dir);
+            let sel = Rc::clone(&selected_path);
+            let pp = Rc::clone(&populate);
+            let pt = Rc::clone(&populate_tree_sb);
+            let ack = Rc::clone(&root_warn_ack);
+            Rc::new(move |target: PathBuf| {
+                hide_all_menus();
+                if !target.is_dir() {
+                    return;
+                }
+                if is_system_root_path(&target) && !ack.get() {
+                    let cd2 = Rc::clone(&cd);
+                    let sel2 = Rc::clone(&sel);
+                    let pp2 = Rc::clone(&pp);
+                    let pt2 = Rc::clone(&pt);
+                    let ack2 = Rc::clone(&ack);
+                    let t2 = target.clone();
+                    open_root_warning_dialog(
+                        app,
+                        win,
+                        &target,
+                        Box::new(move || {
+                            ack2.set(true);
+                            *cd2.borrow_mut() = t2.clone();
+                            *sel2.borrow_mut() = None;
+                            (pp2.borrow())();
+                            (pt2.borrow())();
+                        }),
+                    );
+                    return;
+                }
+                *cd.borrow_mut() = target;
+                *sel.borrow_mut() = None;
+                (pp.borrow())();
+                (pt.borrow())();
+            })
+        };
+
+        {
+            let nav_h = Rc::clone(&navigate_to);
+            connect_signal(btn_go_home, "clicked", move || {
+                nav_h(home_dir());
+            });
+        }
+        {
+            let tm = Rc::clone(&tree_mode);
+            let pp = Rc::clone(&populate);
+            connect_signal(btn_tree_mode, "clicked", move || {
+                hide_all_menus();
+                let next = !tm.get();
+                tm.set(next);
+                let lbl = cstr(if next { "☰ List" } else { "🌳 Tree" });
+                gtk_button_set_label(btn_tree_mode, lbl.as_ptr());
+                (pp.borrow())();
+            });
+        }
 
         // Core File / Edit Actions (shared by Menu Bar, Context Menu & Hotkeys)
         let act_new_folder: Rc<dyn Fn()> = {
@@ -977,7 +1292,7 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
             });
         }
 
-        // Populate directory function
+        // Populate directory function (supports both flat List View & expandable Tree View)
         let populate_clone = Rc::clone(&populate);
         let cur_dir_p = Rc::clone(&cur_dir);
         let sel_p = Rc::clone(&selected_path);
@@ -985,11 +1300,15 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
         let aid_p = Rc::clone(&active_tab_id);
         let rt_p = Rc::clone(&rebuild_tabs);
         let ctx_p = Rc::clone(&show_ctx_menu);
+        let tm_p = Rc::clone(&tree_mode);
+        let mexp_p = Rc::clone(&main_expanded);
+        let nav_p = Rc::clone(&navigate_to);
 
         *populate.borrow_mut() = Box::new(move || {
             clear_box_children(list_box);
             let dir = cur_dir_p.borrow().clone();
             set_entry_text(path_entry, &dir.to_string_lossy());
+            gtk_widget_set_visible(root_banner, if is_system_root_path(&dir) { 1 } else { 0 });
 
             // Sync active tab's directory & label
             {
@@ -1009,23 +1328,41 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
             }
 
             let cur_sel = sel_p.borrow().clone();
-            let mut entries: Vec<(String, PathBuf, bool, u64)> = Vec::new();
-            if let Ok(rd) = fs::read_dir(&dir) {
-                for ent in rd.flatten() {
-                    let p = ent.path();
-                    let name = ent.file_name().to_string_lossy().to_string();
-                    if name.starts_with('.') {
-                        continue;
+            let is_tree = tm_p.get();
+            let mut entries: Vec<(String, PathBuf, bool, u64, usize)> = Vec::new();
+            if is_tree {
+                let exp_snap = mexp_p.borrow().clone();
+                collect_tree_entries(&dir, 0, &exp_snap, &mut entries);
+            } else {
+                let mut flat: Vec<(String, PathBuf, bool, u64)> = Vec::new();
+                if let Ok(rd) = fs::read_dir(&dir) {
+                    for ent in rd.flatten() {
+                        let p = ent.path();
+                        let name = ent.file_name().to_string_lossy().to_string();
+                        if name.starts_with('.') {
+                            continue;
+                        }
+                        let meta = ent.metadata().ok();
+                        let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                        flat.push((name, p, is_dir, size));
                     }
-                    let meta = ent.metadata().ok();
-                    let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                    let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-                    entries.push((name, p, is_dir, size));
                 }
+                flat.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+                entries = flat
+                    .into_iter()
+                    .map(|(n, p, d, s)| (n, p, d, s, 0usize))
+                    .collect();
             }
-            entries.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.to_lowercase().cmp(&b.0.to_lowercase())));
 
-            set_label_text(status_lbl, &format!("{} items", entries.len()));
+            set_label_text(
+                status_lbl,
+                &format!(
+                    "{} items{}",
+                    entries.len(),
+                    if is_tree { " (Tree View)" } else { "" }
+                ),
+            );
             set_label_text(status_right, &format!("Location: {}", dir.display()));
 
             if entries.is_empty() {
@@ -1035,7 +1372,7 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
                 return;
             }
 
-            for (idx, (name, path, is_dir, size)) in entries.into_iter().enumerate() {
+            for (idx, (name, path, is_dir, size, depth)) in entries.into_iter().enumerate() {
                 let is_sel = cur_sel.as_ref() == Some(&path);
                 let row_cls = if is_sel {
                     "finder-row-selected"
@@ -1044,7 +1381,36 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
                 } else {
                     "finder-row-odd"
                 };
-                let row = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &[row_cls]);
+                let row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[row_cls]);
+
+                if is_tree {
+                    if depth > 0 {
+                        let indent = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+                        gtk_widget_set_size_request(indent, (depth as i32) * 18, -1);
+                        gtk_box_append(row, indent);
+                    }
+                    if is_dir {
+                        let is_exp = mexp_p.borrow().contains(&path);
+                        let chev = new_button(if is_exp { "▾" } else { "▸" }, &["akar-tree-chevron"]);
+                        let p_ex = path.clone();
+                        let mexp_c = Rc::clone(&mexp_p);
+                        let pop_ex = Rc::clone(&populate_clone);
+                        connect_signal(chev, "clicked", move || {
+                            hide_all_menus();
+                            let mut set = mexp_c.borrow_mut();
+                            if !set.remove(&p_ex) {
+                                set.insert(p_ex.clone());
+                            }
+                            drop(set);
+                            (pop_ex.borrow())();
+                        });
+                        gtk_box_append(row, chev);
+                    } else {
+                        let sp = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+                        gtk_widget_set_size_request(sp, 20, -1);
+                        gtk_box_append(row, sp);
+                    }
+                }
 
                 let lower = name.to_lowercase();
                 let (badge_txt, badge_cls, kind_str) = if is_dir {
@@ -1127,16 +1493,13 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
                     });
                 }
 
-                let cur_dir_c = Rc::clone(&cur_dir_p);
+                let nav_o = Rc::clone(&nav_p);
                 let sel_o = Rc::clone(&sel_p);
-                let pop_c = Rc::clone(&populate_clone);
                 let p_open = path.clone();
                 connect_signal(open_btn, "clicked", move || {
                     hide_all_menus();
                     if is_dir {
-                        *cur_dir_c.borrow_mut() = p_open.clone();
-                        *sel_o.borrow_mut() = None;
-                        (pop_c.borrow())();
+                        nav_o(p_open.clone());
                     } else {
                         *sel_o.borrow_mut() = Some(p_open.clone());
                         open_item_in_app(app, &p_open);
@@ -1185,6 +1548,13 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
         gtk_box_append(menu_edit, mi_e_rename);
         gtk_box_append(menu_edit, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
         gtk_box_append(menu_edit, mi_e_delete);
+
+        let mi_about_akar = new_menu_item("🌱", "About Akar", "");
+        gtk_box_append(menu_help, mi_about_akar);
+        connect_signal(mi_about_akar, "clicked", move || {
+            hide_all_menus();
+            open_about_akar(app, win);
+        });
 
         let wire = |btn: *mut GtkWidget, f: &Rc<dyn Fn()>| {
             let fc = Rc::clone(f);
@@ -1298,8 +1668,7 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
             gtk_box_append(sidebar, btn);
             all_sb_btns.borrow_mut().push(btn);
 
-            let cur_dir_s = Rc::clone(&cur_dir);
-            let pop_s = Rc::clone(&populate);
+            let nav_s = Rc::clone(&navigate_to);
             let btns_ref = Rc::clone(&all_sb_btns);
             connect_signal(btn, "clicked", move || {
                 for &b in btns_ref.borrow().iter() {
@@ -1309,8 +1678,7 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
                 remove_css(btn, "sidebar-btn");
                 add_css(btn, "sidebar-btn-active");
                 if target.exists() {
-                    *cur_dir_s.borrow_mut() = target.clone();
-                    (pop_s.borrow())();
+                    nav_s(target.clone());
                 }
             });
         }
@@ -1380,27 +1748,142 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
         }
         (populate_mounts_sb.borrow())();
 
+        // Sidebar Expandable Folder Tree (🌳 FOLDER TREE)
+        let sb_hdr4 = new_label("FOLDER TREE", &["sidebar-section-hdr"]);
+        gtk_label_set_xalign(sb_hdr4, 0.0);
+        gtk_box_append(sidebar, sb_hdr4);
+
+        let tree_scroll = gtk_scrolled_window_new();
+        gtk_scrolled_window_set_policy(tree_scroll, GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+        gtk_widget_set_vexpand(tree_scroll, 1);
+        let tree_sb_box = new_box(GTK_ORIENTATION_VERTICAL, 1, &[]);
+        gtk_scrolled_window_set_child(tree_scroll, tree_sb_box);
+        gtk_box_append(sidebar, tree_scroll);
+
+        {
+            let cd_t = Rc::clone(&cur_dir);
+            let exp_t = Rc::clone(&sb_expanded);
+            let nav_t = Rc::clone(&navigate_to);
+            let pt_self = Rc::clone(&populate_tree_sb);
+
+            fn collect_sb_dirs(
+                dir: &std::path::Path,
+                depth: usize,
+                exp: &HashSet<PathBuf>,
+                out: &mut Vec<(String, PathBuf, usize, bool)>,
+            ) {
+                if depth > 4 || out.len() >= 140 {
+                    return;
+                }
+                let mut subs: Vec<(String, PathBuf)> = Vec::new();
+                if let Ok(rd) = fs::read_dir(dir) {
+                    for ent in rd.flatten() {
+                        let p = ent.path();
+                        let name = ent.file_name().to_string_lossy().to_string();
+                        if name.starts_with('.') {
+                            continue;
+                        }
+                        if ent.metadata().map(|m| m.is_dir()).unwrap_or(false) {
+                            subs.push((name, p));
+                        }
+                    }
+                }
+                subs.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+                for (name, p) in subs.into_iter().take(40) {
+                    if out.len() >= 140 {
+                        break;
+                    }
+                    let is_e = exp.contains(&p);
+                    out.push((name, p.clone(), depth, is_e));
+                    if is_e {
+                        collect_sb_dirs(&p, depth + 1, exp, out);
+                    }
+                }
+            }
+
+            *populate_tree_sb.borrow_mut() = Box::new(move || {
+                clear_box_children(tree_sb_box);
+                let active_dir = cd_t.borrow().clone();
+                let exp_snap = exp_t.borrow().clone();
+
+                let mut nodes: Vec<(String, PathBuf, usize, bool)> = Vec::new();
+                let home = home_dir();
+                let home_exp = exp_snap.contains(&home);
+                nodes.push(("🏠 Home".to_string(), home.clone(), 0, home_exp));
+                if home_exp {
+                    collect_sb_dirs(&home, 1, &exp_snap, &mut nodes);
+                }
+                let sys_root = PathBuf::from("/");
+                let root_exp = exp_snap.contains(&sys_root);
+                nodes.push(("💻 System Root (/)".to_string(), sys_root.clone(), 0, root_exp));
+                if root_exp {
+                    collect_sb_dirs(&sys_root, 1, &exp_snap, &mut nodes);
+                }
+
+                for (label, path, depth, is_exp) in nodes {
+                    let row = new_box(GTK_ORIENTATION_HORIZONTAL, 2, &[]);
+                    if depth > 0 {
+                        let ind = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+                        gtk_widget_set_size_request(ind, (depth as i32) * 12, -1);
+                        gtk_box_append(row, ind);
+                    }
+                    let chev = new_button(if is_exp { "▾" } else { "▸" }, &["akar-tree-chevron"]);
+                    let is_act = active_dir == path;
+                    let txt = if depth == 0 { label } else { format!("📁 {}", label) };
+                    let nbtn = new_left_button(
+                        "",
+                        &txt,
+                        &[if is_act { "akar-tree-node-active" } else { "akar-tree-node" }],
+                    );
+                    gtk_widget_set_hexpand(nbtn, 1);
+
+                    gtk_box_append(row, chev);
+                    gtk_box_append(row, nbtn);
+                    gtk_box_append(tree_sb_box, row);
+
+                    {
+                        let p_ex = path.clone();
+                        let exp_c = Rc::clone(&exp_t);
+                        let pt_c = Rc::clone(&pt_self);
+                        connect_signal(chev, "clicked", move || {
+                            let mut set = exp_c.borrow_mut();
+                            if !set.remove(&p_ex) {
+                                set.insert(p_ex.clone());
+                            }
+                            drop(set);
+                            (pt_c.borrow())();
+                        });
+                    }
+                    {
+                        let p_nav = path.clone();
+                        let nav_c = Rc::clone(&nav_t);
+                        connect_signal(nbtn, "clicked", move || {
+                            nav_c(p_nav.clone());
+                        });
+                    }
+                }
+            });
+        }
+        (populate_tree_sb.borrow())();
+
         // Toolbar handlers
         {
             let cur_dir_u = Rc::clone(&cur_dir);
-            let pop_u = Rc::clone(&populate);
+            let nav_u = Rc::clone(&navigate_to);
             connect_signal(btn_up, "clicked", move || {
                 let parent = cur_dir_u.borrow().parent().map(|p| p.to_path_buf());
                 if let Some(p) = parent {
-                    *cur_dir_u.borrow_mut() = p;
-                    (pop_u.borrow())();
+                    nav_u(p);
                 }
             });
         }
         {
-            let cur_dir_e = Rc::clone(&cur_dir);
-            let pop_e = Rc::clone(&populate);
+            let nav_e = Rc::clone(&navigate_to);
             connect_signal(path_entry, "activate", move || {
                 let txt = get_entry_text(path_entry);
                 let p = PathBuf::from(txt.trim());
                 if p.is_dir() {
-                    *cur_dir_e.borrow_mut() = p;
-                    (pop_e.borrow())();
+                    nav_e(p);
                 }
             });
         }

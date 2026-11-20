@@ -1131,6 +1131,67 @@ button.akar-add-tab:hover {
     padding: 5px 12px 5px 9px;
 }
 
+.akar-root-banner {
+    background-color: #FEF3C7;
+    border-bottom: 1px solid #F59E0B;
+    padding: 6px 12px;
+}
+
+.akar-root-banner-lbl {
+    color: #92400E;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+button.akar-tree-chevron {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: rgba(15, 61, 46, 0.72);
+    border-radius: 5px;
+    padding: 0 3px;
+    min-width: 20px;
+    min-height: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+button.akar-tree-chevron:hover {
+    background-color: rgba(47, 125, 79, 0.16);
+    color: #0F3D2E;
+}
+
+button.akar-tree-node {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: #0F3D2E;
+    border-radius: 6px;
+    padding: 2px 6px;
+    min-height: 22px;
+    font-size: 11.5px;
+    font-weight: 500;
+    box-shadow: none;
+}
+
+button.akar-tree-node:hover {
+    background-color: rgba(47, 125, 79, 0.12);
+}
+
+button.akar-tree-node-active {
+    background-image: none;
+    background-color: rgba(47, 125, 79, 0.22);
+    border: none;
+    color: #0F3D2E;
+    border-radius: 6px;
+    padding: 2px 6px;
+    min-height: 22px;
+    font-size: 11.5px;
+    font-weight: 700;
+    box-shadow: none;
+}
+
 .pancer-broadcast-badge {
     background-color: rgba(232, 163, 61, 0.22);
     border: 1px solid #E8A33D;
