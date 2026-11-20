@@ -637,6 +637,119 @@ unsafe fn build_dock_page(handles: Rc<DesktopHandles>) -> *mut GtkWidget {
     }
 
     gtk_box_append(page, dock_card);
+
+    // 6. Display Resolution Card (Works with TigerVNC, x11vnc, and Physical/KVM Displays)
+    let disp_card = new_box(GTK_ORIENTATION_VERTICAL, 10, &["app-card"]);
+    let disp_hdr = new_label("🖥️ DISPLAY & VNC RESOLUTION", &["app-section-title"]);
+    gtk_label_set_xalign(disp_hdr, 0.0);
+    let (cw, ch) = get_x11_screen_size();
+    let disp_status = new_label(
+        &format!("Current resolution: {} × {}  •  Select a preset or enter custom hardware resolution.", cw, ch),
+        &["app-muted"],
+    );
+    gtk_label_set_xalign(disp_status, 0.0);
+    gtk_label_set_wrap(disp_status, 1);
+
+    let apply_resolution = {
+        let h = Rc::clone(&handles);
+        Rc::new(move |w: u32, ht: u32| {
+            let mode_name = format!("{}x{}", w, ht);
+            // Detect connected xrandr output (e.g. VNC-0, Virtual-1, HDMI-1)
+            let output = Command::new("sh")
+                .args(["-c", "xrandr --query | awk '/ connected/{print $1; exit}'"])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "VNC-0".to_string());
+
+            let script = format!(
+                "if ! xrandr --output {out} --mode {m} 2>/dev/null; then \
+                   LINE=$(cvt {w} {ht} 60 | awk '/Modeline/{{$1=\"\"; sub(/^ /, \"\"); print}}'); \
+                   NAME=$(echo \"$LINE\" | awk '{{print $1}}'); \
+                   xrandr --newmode $LINE 2>/dev/null || true; \
+                   xrandr --addmode {out} $NAME 2>/dev/null || true; \
+                   xrandr --output {out} --mode $NAME 2>/dev/null || xrandr --fb {m}; \
+                 fi",
+                out = output,
+                m = mode_name,
+                w = w,
+                ht = ht
+            );
+            let _ = Command::new("sh").args(["-c", &script]).status();
+            let desk = h.desktop_win;
+            timeout_add_ms(120, move || {
+                set_x11_desktop_window(desk);
+                let (nw, nh) = get_x11_screen_size();
+                set_label_text(
+                    disp_status,
+                    &format!("✅ Resolution applied: {} × {} (output: {})", nw, nh, output),
+                );
+                false
+            });
+        })
+    };
+
+    let res_flow = gtk_flow_box_new();
+    gtk_flow_box_set_max_children_per_line(res_flow, 4);
+    gtk_flow_box_set_min_children_per_line(res_flow, 3);
+    gtk_flow_box_set_row_spacing(res_flow, 6);
+    gtk_flow_box_set_column_spacing(res_flow, 6);
+    gtk_flow_box_set_selection_mode(res_flow, 0);
+
+    let res_presets: [(u32, u32, &str); 8] = [
+        (1280, 720, "1280 × 720 (HD)"),
+        (1366, 768, "1366 × 768"),
+        (1440, 900, "1440 × 900"),
+        (1600, 900, "1600 × 900"),
+        (1680, 1050, "1680 × 1050"),
+        (1920, 1080, "1920 × 1080 (FHD)"),
+        (1920, 1200, "1920 × 1200"),
+        (2560, 1440, "2560 × 1440 (QHD)"),
+    ];
+    for (rw, rh, lbl) in res_presets {
+        let is_cur = cw == rw as i32 && ch == rh as i32;
+        let b = new_button(lbl, if is_cur { &["seg-btn-active"] } else { &["seg-btn"] });
+        gtk_flow_box_append(res_flow, b);
+        let ar = Rc::clone(&apply_resolution);
+        connect_signal(b, "clicked", move || ar(rw, rh));
+    }
+
+    let custom_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    let w_in = gtk_entry_new();
+    let ph_w = cstr("Width (e.g. 1920)");
+    gtk_entry_set_placeholder_text(w_in, ph_w.as_ptr());
+    gtk_widget_set_size_request(w_in, 130, -1);
+    let x_lbl = new_label("×", &["kv-key"]);
+    let h_in = gtk_entry_new();
+    let ph_h = cstr("Height (e.g. 1080)");
+    gtk_entry_set_placeholder_text(h_in, ph_h.as_ptr());
+    gtk_widget_set_size_request(h_in, 130, -1);
+    let btn_custom_res = new_button("Apply Custom", &["primary-btn"]);
+    {
+        let ar = Rc::clone(&apply_resolution);
+        connect_signal(btn_custom_res, "clicked", move || {
+            let pw = get_entry_text(w_in).trim().parse::<u32>().unwrap_or(0);
+            let ph = get_entry_text(h_in).trim().parse::<u32>().unwrap_or(0);
+            if (640..=7680).contains(&pw) && (480..=4320).contains(&ph) {
+                ar(pw, ph);
+            } else {
+                set_label_text(disp_status, "❌ Enter valid resolution (e.g. 1920 × 1080).");
+            }
+        });
+    }
+    gtk_box_append(custom_row, w_in);
+    gtk_box_append(custom_row, x_lbl);
+    gtk_box_append(custom_row, h_in);
+    gtk_box_append(custom_row, btn_custom_res);
+
+    gtk_box_append(disp_card, disp_hdr);
+    gtk_box_append(disp_card, disp_status);
+    gtk_box_append(disp_card, res_flow);
+    gtk_box_append(disp_card, custom_row);
+    gtk_box_append(page, disp_card);
+
     gtk_scrolled_window_set_child(scroller, page);
     scroller
 }

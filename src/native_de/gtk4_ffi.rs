@@ -367,6 +367,18 @@ extern "C" {
     pub fn gdk_x11_display_get_xdisplay(display: *mut GdkDisplay) -> GPointer;
     pub fn gdk_x11_surface_get_xid(surface: GPointer) -> c_ulong;
     pub fn XDefaultScreen(display: GPointer) -> c_int;
+    pub fn XDefaultRootWindow(display: GPointer) -> c_ulong;
+    pub fn XGetGeometry(
+        display: GPointer,
+        drawable: c_ulong,
+        root_return: *mut c_ulong,
+        x_return: *mut c_int,
+        y_return: *mut c_int,
+        width_return: *mut c_uint,
+        height_return: *mut c_uint,
+        border_width_return: *mut c_uint,
+        depth_return: *mut c_uint,
+    ) -> c_int;
     pub fn XDisplayWidth(display: GPointer, screen: c_int) -> c_int;
     pub fn XDisplayHeight(display: GPointer, screen: c_int) -> c_int;
     pub fn XInternAtom(display: GPointer, atom_name: *const c_char, only_if_exists: c_int) -> c_ulong;
@@ -806,7 +818,7 @@ pub unsafe fn scroll_window_to_bottom(sw: *mut GtkWidget) {
     }
 }
 
-/// Query current physical/virtual X11 screen resolution (supports dynamic VNC / xrandr resize)
+/// Query LIVE physical/virtual X11 root window resolution (always up-to-date after TigerVNC / xrandr resize)
 pub unsafe fn get_x11_screen_size() -> (i32, i32) {
     let display = gdk_display_get_default();
     if display.is_null() {
@@ -815,6 +827,30 @@ pub unsafe fn get_x11_screen_size() -> (i32, i32) {
     let xdisplay = gdk_x11_display_get_xdisplay(display);
     if xdisplay.is_null() {
         return (0, 0);
+    }
+    let root = XDefaultRootWindow(xdisplay);
+    let mut root_ret: c_ulong = 0;
+    let mut x: c_int = 0;
+    let mut y: c_int = 0;
+    let mut w: c_uint = 0;
+    let mut h: c_uint = 0;
+    let mut border: c_uint = 0;
+    let mut depth: c_uint = 0;
+    if XGetGeometry(
+        xdisplay,
+        root,
+        &mut root_ret,
+        &mut x,
+        &mut y,
+        &mut w,
+        &mut h,
+        &mut border,
+        &mut depth,
+    ) != 0
+        && w > 0
+        && h > 0
+    {
+        return (w as i32, h as i32);
     }
     let screen = XDefaultScreen(xdisplay);
     (XDisplayWidth(xdisplay, screen), XDisplayHeight(xdisplay, screen))
@@ -838,9 +874,7 @@ pub unsafe fn set_x11_desktop_window(win: *mut GtkWidget) {
         return;
     }
 
-    let screen = XDefaultScreen(xdisplay);
-    let w = XDisplayWidth(xdisplay, screen);
-    let h = XDisplayHeight(xdisplay, screen);
+    let (w, h) = get_x11_screen_size();
 
     let prop_name = cstr("_NET_WM_WINDOW_TYPE");
     let desk_name = cstr("_NET_WM_WINDOW_TYPE_DESKTOP");
@@ -887,9 +921,7 @@ pub unsafe fn set_x11_lock_window(win: *mut GtkWidget) {
         return;
     }
 
-    let screen = XDefaultScreen(xdisplay);
-    let w = XDisplayWidth(xdisplay, screen);
-    let h = XDisplayHeight(xdisplay, screen);
+    let (w, h) = get_x11_screen_size();
 
     let xa_atom: c_ulong = 4; // XA_ATOM
     let prop_mode_replace: c_int = 0;
