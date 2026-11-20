@@ -828,11 +828,13 @@ unsafe fn build_desktop_shell(
     apply_desktop_settings(&handles);
 
     let active_user_t = Rc::clone(&active_user);
+    let login_holder_t = Rc::clone(&login_win_holder);
+    let last_screen = Rc::new(std::cell::Cell::new((0i32, 0i32)));
     timeout_add_sec(2, move || {
         set_label_text(top_clock, &now_short_clock());
         set_label_text(w_clock, &now_time_str());
         set_label_text(w_date, &now_date_str());
-        set_label_text(user_pill, &format!("👤 {}", active_user_t.borrow()));
+        set_label_text(user_name_lbl, &active_user_t.borrow());
         let (u, t, p) = apps::read_mem_usage();
         set_label_text(
             w_mem,
@@ -845,6 +847,19 @@ unsafe fn build_desktop_shell(
             ),
         );
         gtk_progress_bar_set_fraction(w_bar, p);
+
+        // Auto-adapt Desktop & Lock Screen when VNC / xrandr dynamically resizes the screen
+        let cur_sz = get_x11_screen_size();
+        if cur_sz.0 > 0 && cur_sz.1 > 0 && cur_sz != last_screen.get() {
+            last_screen.set(cur_sz);
+            if gtk_widget_get_visible(win) != 0 {
+                set_x11_desktop_window(win);
+            }
+            let lw = *login_holder_t.borrow();
+            if !lw.is_null() && gtk_widget_get_visible(lw) != 0 {
+                set_x11_lock_window(lw);
+            }
+        }
         true
     });
 

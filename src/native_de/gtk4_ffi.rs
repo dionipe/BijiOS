@@ -806,6 +806,20 @@ pub unsafe fn scroll_window_to_bottom(sw: *mut GtkWidget) {
     }
 }
 
+/// Query current physical/virtual X11 screen resolution (supports dynamic VNC / xrandr resize)
+pub unsafe fn get_x11_screen_size() -> (i32, i32) {
+    let display = gdk_display_get_default();
+    if display.is_null() {
+        return (0, 0);
+    }
+    let xdisplay = gdk_x11_display_get_xdisplay(display);
+    if xdisplay.is_null() {
+        return (0, 0);
+    }
+    let screen = XDefaultScreen(xdisplay);
+    (XDisplayWidth(xdisplay, screen), XDisplayHeight(xdisplay, screen))
+}
+
 /// Mark a GTK4 GtkWindow as an official X11 EWMH Desktop window (_NET_WM_WINDOW_TYPE_DESKTOP)
 /// covering 100% of the screen (0,0 -> WxH) permanently below all apps, ignoring Openbox <margins>
 /// and never interfering with Alt+Tab or raising above application windows when clicked.
