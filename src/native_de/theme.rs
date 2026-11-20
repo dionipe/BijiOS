@@ -1136,6 +1136,54 @@ button.wp-tile-active {
     font-weight: 800;
 }
 
+.kv-key {
+    font-size: 12px;
+    font-weight: 600;
+    color: #64748B;
+}
+
+.kv-val {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: #12332A;
+}
+
+button.link-btn {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: #2F7D4F;
+    padding: 0px 2px;
+    min-height: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+button.link-btn:hover {
+    color: #1B5E3A;
+    text-decoration: underline;
+}
+
+button.link-pill {
+    background-image: none;
+    background-color: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    color: #12332A;
+    border-radius: 999px;
+    padding: 3px 10px;
+    min-height: 24px;
+    font-size: 11.5px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+button.link-pill:hover {
+    background-color: #F4EBD9;
+    border-color: #2F7D4F;
+    color: #2F7D4F;
+}
+
 /* In-Window Liquid Glass Dropdown Menu (GtkOverlay — Zero Black X11 Artifacts) */
 .bijios-dropdown-menu {
     background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(244, 235, 217, 0.94) 100%);

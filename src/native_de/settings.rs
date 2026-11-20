@@ -862,23 +862,41 @@ unsafe fn build_general_page(
     let hostname = fs::read_to_string("/etc/hostname").unwrap_or_else(|_| "BijiOS".into());
     let (used_mb, total_mb, _) = read_mem_usage();
     let (arch, kernel) = crate::native_de::apps::read_arch_and_kernel();
-    let a_meta = new_label(
-        &format!(
-            "Base OS: {}  •  Arch: {}  •  Kernel: {}\nHost: {}  •  RAM: {} / {} MB  •  CPU: {}\nHypervisor: {}  •  https://idve.cloud/\nRepository: https://github.com/dionipe/BijiOS  •  Contributor: @dionipe",
-            crate::native_de::apps::read_os_pretty_name(),
-            arch,
-            kernel,
-            hostname.trim(),
-            used_mb,
-            total_mb,
-            crate::native_de::apps::read_cpu_summary(),
-            crate::native_de::apps::read_virt_host_info()
-        ),
-        &["app-muted"],
+
+    let kv_rows: [(&str, String); 4] = [
+        ("Base OS", format!("{} ({})", crate::native_de::apps::read_os_pretty_name(), arch)),
+        ("Kernel & Host", format!("{}  •  {}", kernel, hostname.trim())),
+        ("CPU & Memory", format!("{}  •  {} / {} MB RAM", crate::native_de::apps::read_cpu_summary(), used_mb, total_mb)),
+        ("Hypervisor", crate::native_de::apps::read_virt_host_info()),
+    ];
+    for (k, v) in kv_rows {
+        let row = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &[]);
+        let kl = new_label(k, &["kv-key"]);
+        gtk_label_set_xalign(kl, 0.0);
+        gtk_widget_set_size_request(kl, 120, -1);
+        let vl = new_label(&v, &["kv-val"]);
+        gtk_label_set_xalign(vl, 0.0);
+        gtk_label_set_wrap(vl, 1);
+        gtk_widget_set_hexpand(vl, 1);
+        gtk_box_append(row, kl);
+        gtk_box_append(row, vl);
+        gtk_box_append(about_card, row);
+    }
+
+    let links_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    gtk_box_append(
+        links_row,
+        new_link_button("🐙 github.com/dionipe/BijiOS ↗", "https://github.com/dionipe/BijiOS", &["link-pill"]),
     );
-    gtk_label_set_xalign(a_meta, 0.0);
-    gtk_label_set_wrap(a_meta, 1);
-    gtk_box_append(about_card, a_meta);
+    gtk_box_append(
+        links_row,
+        new_link_button("👤 @dionipe ↗", "https://github.com/dionipe", &["link-pill"]),
+    );
+    gtk_box_append(
+        links_row,
+        new_link_button("☁️ idve.cloud ↗", "https://idve.cloud/", &["link-pill"]),
+    );
+    gtk_box_append(about_card, links_row);
     gtk_box_append(page, about_card);
 
     // 2. Software Update Card

@@ -1479,14 +1479,20 @@ pub fn read_cpu_summary() -> String {
 
 pub fn open_about(app: *mut GtkApplication) {
     unsafe {
-        let win = create_app_window(app, "About BijiOS", 640, 640);
+        let win = create_app_window(app, "About BijiOS", 660, 640);
         gtk_window_set_resizable(win, 0);
-        let root = new_box(GTK_ORIENTATION_VERTICAL, 14, &[]);
-        set_margin_all(root, 24);
+
+        let scroll = gtk_scrolled_window_new();
+        gtk_scrolled_window_set_policy(scroll, GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+        gtk_widget_set_hexpand(scroll, 1);
+        gtk_widget_set_vexpand(scroll, 1);
+
+        let root = new_box(GTK_ORIENTATION_VERTICAL, 12, &[]);
+        set_margin_all(root, 20);
 
         // Dual Brand Header: BijiOS OS Logo + Host IDVE / KVM Logo
-        let brand_bar = new_box(GTK_ORIENTATION_HORIZONTAL, 18, &["app-card"]);
-        let os_logo = new_logo_image(68, true);
+        let brand_bar = new_box(GTK_ORIENTATION_HORIZONTAL, 16, &["app-card"]);
+        let os_logo = new_logo_image(64, true);
         gtk_widget_set_valign(os_logo, GTK_ALIGN_CENTER);
 
         let title_col = new_box(GTK_ORIENTATION_VERTICAL, 3, &[]);
@@ -1502,7 +1508,7 @@ pub fn open_about(app: *mut GtkApplication) {
         let idve_col = new_box(GTK_ORIENTATION_VERTICAL, 3, &[]);
         gtk_widget_set_valign(idve_col, GTK_ALIGN_CENTER);
         gtk_widget_set_halign(idve_col, GTK_ALIGN_END);
-        let idve_img = new_idve_logo(124, 38);
+        let idve_img = new_idve_logo(120, 36);
         let idve_cap = new_label("Powered by IDVE / KVM", &["finder-meta-lbl"]);
         gtk_label_set_xalign(idve_cap, 1.0);
         gtk_box_append(idve_col, idve_img);
@@ -1513,7 +1519,7 @@ pub fn open_about(app: *mut GtkApplication) {
         gtk_box_append(brand_bar, idve_col);
         gtk_box_append(root, brand_bar);
 
-        // Detailed Operating System Card
+        // Detailed Operating System Card (2-column Key / Value rows)
         let os_card = new_box(GTK_ORIENTATION_VERTICAL, 6, &["app-card"]);
         let os_hdr = new_label("🌱 OPERATING SYSTEM DETAILS", &["app-section-title"]);
         gtk_label_set_xalign(os_hdr, 0.0);
@@ -1524,65 +1530,135 @@ pub fn open_about(app: *mut GtkApplication) {
         let (used_mb, total_mb, _) = read_mem_usage();
         let (arch, kernel) = read_arch_and_kernel();
 
-        let os_rows = [
-            "OS Release: BijiOS v1.0.0 (Codename: Padi)".to_string(),
-            format!("Base Distribution: {}", read_os_pretty_name()),
-            format!("Kernel & Architecture: {} ({})", kernel, arch),
-            "Desktop Environment: Pure Rust + Native GTK4 (Zero Chromium)".to_string(),
-            "Storage Engine: TOON v4 (Token-Oriented Object Notation)".to_string(),
-            format!("Hostname / Active User: {}  •  {}", hostname.trim(), user),
-            format!("Processor: {}", read_cpu_summary()),
-            format!("Memory (RAM): {} MB / {} MB", used_mb, total_mb),
+        let os_kv: [(&str, String); 8] = [
+            ("OS Release", "BijiOS v1.0.0 (Codename: Padi)".to_string()),
+            ("Base Distribution", read_os_pretty_name()),
+            ("Kernel & Arch", format!("{} ({})", kernel, arch)),
+            ("Desktop", "Pure Rust + Native GTK4 (Zero Chromium)".to_string()),
+            ("Storage Engine", "TOON v4 (Token-Oriented Object Notation)".to_string()),
+            ("Host / User", format!("{}  •  {}", hostname.trim(), user)),
+            ("Processor", read_cpu_summary()),
+            ("Memory (RAM)", format!("{} MB / {} MB", used_mb, total_mb)),
         ];
-        for r in os_rows {
-            let l = new_label(&r, &["app-muted"]);
-            gtk_label_set_xalign(l, 0.0);
-            gtk_label_set_wrap(l, 1);
-            gtk_box_append(os_card, l);
+        for (k, v) in os_kv {
+            let row = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &[]);
+            let kl = new_label(k, &["kv-key"]);
+            gtk_label_set_xalign(kl, 0.0);
+            gtk_widget_set_size_request(kl, 148, -1);
+            let vl = new_label(&v, &["kv-val"]);
+            gtk_label_set_xalign(vl, 0.0);
+            gtk_label_set_wrap(vl, 1);
+            gtk_widget_set_hexpand(vl, 1);
+            gtk_box_append(row, kl);
+            gtk_box_append(row, vl);
+            gtk_box_append(os_card, row);
         }
         gtk_box_append(root, os_card);
 
-        // Host Virtualization Card (IDVE / KVM)
+        // Host Virtualization Card (IDVE / KVM) with clickable hyperlink
         let host_card = new_box(GTK_ORIENTATION_HORIZONTAL, 14, &["app-card"]);
-        let host_logo = new_idve_logo(108, 34);
+        let host_logo = new_idve_logo(104, 32);
         gtk_widget_set_valign(host_logo, GTK_ALIGN_CENTER);
 
-        let host_col = new_box(GTK_ORIENTATION_VERTICAL, 3, &[]);
+        let host_col = new_box(GTK_ORIENTATION_VERTICAL, 4, &[]);
         gtk_widget_set_hexpand(host_col, 1);
         let h_hdr = new_label("☁️ HOST INFRASTRUCTURE (IDVE / KVM)", &["app-section-title"]);
         gtk_label_set_xalign(h_hdr, 0.0);
-        let h_virt = new_label(&format!("Hypervisor: {}", read_virt_host_info()), &["app-muted"]);
-        gtk_label_set_xalign(h_virt, 0.0);
-        let h_url = new_label("Cloud Platform: Indonesia Virtual Environment — https://idve.cloud/", &["finder-meta-lbl"]);
-        gtk_label_set_xalign(h_url, 0.0);
+        let h_virt_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+        let h_vk = new_label("Hypervisor", &["kv-key"]);
+        gtk_label_set_xalign(h_vk, 0.0);
+        gtk_widget_set_size_request(h_vk, 92, -1);
+        let h_vv = new_label(&read_virt_host_info(), &["kv-val"]);
+        gtk_label_set_xalign(h_vv, 0.0);
+        gtk_box_append(h_virt_row, h_vk);
+        gtk_box_append(h_virt_row, h_vv);
+
+        let h_url_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+        let h_uk = new_label("Platform", &["kv-key"]);
+        gtk_label_set_xalign(h_uk, 0.0);
+        gtk_widget_set_size_request(h_uk, 92, -1);
+        let h_uv = new_label("Indonesia Virtual Environment —", &["kv-val"]);
+        gtk_label_set_xalign(h_uv, 0.0);
+        let h_link = new_link_button("https://idve.cloud/ ↗", "https://idve.cloud/", &["link-btn"]);
+        gtk_box_append(h_url_row, h_uk);
+        gtk_box_append(h_url_row, h_uv);
+        gtk_box_append(h_url_row, h_link);
+
         gtk_box_append(host_col, h_hdr);
-        gtk_box_append(host_col, h_virt);
-        gtk_box_append(host_col, h_url);
+        gtk_box_append(host_col, h_virt_row);
+        gtk_box_append(host_col, h_url_row);
 
         gtk_box_append(host_card, host_logo);
         gtk_box_append(host_card, host_col);
         gtk_box_append(root, host_card);
 
-        // Bundled Open-Source Office Suite Credits (Storytold — Apache License 2.0)
-        let cred_card = new_box(GTK_ORIENTATION_VERTICAL, 4, &["app-card"]);
-        let c_hdr = new_label("📜 BUNDLED OPEN-SOURCE SUITE CREDITS (APACHE-2.0)", &["app-section-title"]);
+        // Bundled Open-Source Suite Credits (Storytold — Apache License 2.0)
+        let cred_card = new_box(GTK_ORIENTATION_VERTICAL, 8, &["app-card"]);
+        let c_hdr = new_label("📜 BUNDLED OPEN-SOURCE SUITE (APACHE-2.0)", &["app-section-title"]);
         gtk_label_set_xalign(c_hdr, 0.0);
-        let c_txt = new_label(
-            "WordCraft (v0.18.1), GridCraft (v0.19.1), DeckCraft (v0.18.1), PDFCraft (v0.21.1)\n\
-             By Storytold / ArtCraft (https://github.com/storytold) — Licensed under Apache License 2.0.\n\
-             GitHub: https://github.com/dionipe/BijiOS  •  Contributor: @dionipe (https://github.com/dionipe)",
-            &["finder-meta-lbl"],
-        );
-        gtk_label_set_xalign(c_txt, 0.0);
-        gtk_label_set_wrap(c_txt, 1);
         gtk_box_append(cred_card, c_hdr);
-        gtk_box_append(cred_card, c_txt);
+
+        let pills_row = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+        for (lbl, url) in [
+            ("📝 WordCraft v0.18.1 ↗", "https://github.com/storytold/wordcraft"),
+            ("📊 GridCraft v0.19.1 ↗", "https://github.com/storytold/gridcraft"),
+            ("📽️ DeckCraft v0.18.1 ↗", "https://github.com/storytold/deckcraft"),
+            ("📕 PDFCraft v0.21.1 ↗", "https://github.com/storytold/pdfcraft"),
+        ] {
+            let pill = new_link_button(lbl, url, &["link-pill"]);
+            gtk_box_append(pills_row, pill);
+        }
+        gtk_box_append(cred_card, pills_row);
+
+        let by_row = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+        let by_k = new_label("Upstream Author:", &["kv-key"]);
+        gtk_label_set_xalign(by_k, 0.0);
+        let by_link = new_link_button(
+            "Storytold / ArtCraft ↗",
+            "https://github.com/storytold",
+            &["link-btn"],
+        );
+        let by_sep = new_label("•", &["finder-meta-lbl"]);
+        let lic_link = new_link_button(
+            "Apache License 2.0 ↗",
+            "https://www.apache.org/licenses/LICENSE-2.0",
+            &["link-btn"],
+        );
+        gtk_box_append(by_row, by_k);
+        gtk_box_append(by_row, by_link);
+        gtk_box_append(by_row, by_sep);
+        gtk_box_append(by_row, lic_link);
+        gtk_box_append(cred_card, by_row);
+
+        let repo_row = new_box(GTK_ORIENTATION_HORIZONTAL, 6, &[]);
+        let repo_k = new_label("Repository:", &["kv-key"]);
+        gtk_label_set_xalign(repo_k, 0.0);
+        let repo_link = new_link_button(
+            "github.com/dionipe/BijiOS ↗",
+            "https://github.com/dionipe/BijiOS",
+            &["link-btn"],
+        );
+        let cont_k = new_label("•  Contributor:", &["kv-key"]);
+        let cont_link = new_link_button("@dionipe ↗", "https://github.com/dionipe", &["link-btn"]);
+        gtk_box_append(repo_row, repo_k);
+        gtk_box_append(repo_row, repo_link);
+        gtk_box_append(repo_row, cont_k);
+        gtk_box_append(repo_row, cont_link);
+        gtk_box_append(cred_card, repo_row);
+
         gtk_box_append(root, cred_card);
 
-        let copy = new_label("™ and © 2024–2027 BijiOS • Hosted on IDVE Cloud (https://idve.cloud/)", &["finder-meta-lbl"]);
-        gtk_box_append(root, copy);
+        // Footer with clickable IDVE Cloud link
+        let footer = new_box(GTK_ORIENTATION_HORIZONTAL, 4, &[]);
+        gtk_widget_set_halign(footer, GTK_ALIGN_CENTER);
+        let copy_lbl = new_label("™ and © 2024–2027 BijiOS  •  Hosted on", &["finder-meta-lbl"]);
+        let copy_link = new_link_button("IDVE Cloud ↗", "https://idve.cloud/", &["link-btn"]);
+        gtk_box_append(footer, copy_lbl);
+        gtk_box_append(footer, copy_link);
+        gtk_box_append(root, footer);
 
-        gtk_window_set_child(win, root);
+        gtk_scrolled_window_set_child(scroll, root);
+        gtk_window_set_child(win, scroll);
         gtk_window_present(win);
     }
 }

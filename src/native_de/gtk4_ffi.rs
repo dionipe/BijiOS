@@ -446,6 +446,23 @@ pub unsafe fn new_wallpaper_preview(filename: &str, width: i32, height: i32) -> 
     fallback
 }
 
+/// Clickable hyperlink button that opens URL in the default browser via xdg-open
+pub unsafe fn new_link_button(label: &str, url: &str, css: &[&str]) -> *mut GtkWidget {
+    let btn = new_button(label, css);
+    let tip = cstr(url);
+    gtk_widget_set_tooltip_text(btn, tip.as_ptr());
+    let u = url.to_string();
+    connect_signal(btn, "clicked", move || {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&u)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    });
+    btn
+}
+
 /// Official BijiOS SVG Logo widget (Golden Seed + Hijau Tunas & Hijau Muda leaves)
 pub unsafe fn new_logo_image(pixel_size: i32, badge: bool) -> *mut GtkWidget {
     let filename = if badge {
