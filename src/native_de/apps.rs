@@ -151,6 +151,7 @@ pub fn create_app_window(app: *mut GtkApplication, title: &str, width: i32, heig
         let t = cstr(title);
         gtk_window_set_title(win, t.as_ptr());
         gtk_window_set_default_size(win, width, height);
+        gtk_window_set_resizable(win, 1);
         add_css(win, "app-window");
 
         // Custom macOS Liquid Glass Titlebar (Traffic Lights + Integrated Tab Pill — ekspektasi/toolbar.png)

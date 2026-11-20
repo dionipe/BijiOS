@@ -413,9 +413,23 @@ window.app-window {
     background-image: none;
     background-color: #FFFFFF;
     color: #12332A;
-    border: 1px solid rgba(18, 51, 42, 0.22);
+    border: 1px solid rgba(18, 51, 42, 0.24);
     border-radius: 14px;
-    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
+    margin: 10px;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.30);
+}
+
+window.app-window.maximized,
+window.app-window.fullscreen {
+    margin: 0px;
+    border-radius: 0px;
+    box-shadow: none;
+}
+
+window.app-window.maximized .mac-titlebar,
+window.app-window.fullscreen .mac-titlebar {
+    border-top-left-radius: 0px;
+    border-top-right-radius: 0px;
 }
 
 /* Custom macOS Liquid Glass Titlebar (Ultra-Compact, Minimal Top Padding, Fully Rounded) */
