@@ -155,7 +155,7 @@ fn read_uptime_str() -> String {
     "Active".to_string()
 }
 
-fn run_pkexec_sh(script: &str) -> bool {
+pub(crate) fn run_pkexec_sh(script: &str) -> bool {
     // Try non-interactive sudo first (works seamlessly on Openbox without a Polkit GUI agent)
     if let Ok(st) = Command::new("sudo")
         .args(["-n", "/bin/bash", "-c", script])
@@ -178,7 +178,7 @@ fn run_pkexec_sh(script: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
@@ -386,6 +386,8 @@ pub fn open_system_settings(
             ("wallpaper", "🖼️", "Wallpaper", false),
         ];
         let nav_sys = [
+            ("sound", "🔊", "Sound"),
+            ("network", "🌐", "Network"),
             ("general", "⚙️", "General"),
             ("users", "👥", "Users & Groups"),
         ];
@@ -457,7 +459,21 @@ pub fn open_system_settings(
         gtk_stack_add_named(stack, wp_page, n_wp.as_ptr());
 
         // ---------------------------------------------------------------------
-        // PAGE 3: General (About, Software Update, Storage, System)
+        // PAGE 4: Sound (Hardware & Virtual PipeWire/PulseAudio)
+        // ---------------------------------------------------------------------
+        let snd_page = crate::native_de::sys_hw::build_sound_page();
+        let n_snd = cstr("sound");
+        gtk_stack_add_named(stack, snd_page, n_snd.as_ptr());
+
+        // ---------------------------------------------------------------------
+        // PAGE 5: Network (Ethernet & Wi-Fi via nmcli)
+        // ---------------------------------------------------------------------
+        let net_page = crate::native_de::sys_hw::build_network_page(app);
+        let n_net = cstr("network");
+        gtk_stack_add_named(stack, net_page, n_net.as_ptr());
+
+        // ---------------------------------------------------------------------
+        // PAGE 6: General (About, Software Update, Storage, System)
         // ---------------------------------------------------------------------
         let gen_page = build_general_page(app, win, Rc::clone(&on_lock));
         let n_gen = cstr("general");

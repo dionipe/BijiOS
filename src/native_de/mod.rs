@@ -6,6 +6,7 @@ pub mod apps;
 pub mod gtk4_ffi;
 pub mod pancer;
 pub mod settings;
+pub mod sys_hw;
 pub mod theme;
 
 use gtk4_ffi::*;
