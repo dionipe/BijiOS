@@ -227,12 +227,28 @@ unsafe fn create_vte_pane(work_dir: &PathBuf) -> VtePane {
     let wd = work_dir.to_string_lossy().to_string();
     let c_wd = cstr(&wd);
     let c_shell = cstr("/bin/bash");
-    let argv = [c_shell.as_ptr(), std::ptr::null()];
+    let rc_candidates = [
+        "/usr/share/bijios-desktop/pancer-bashrc",
+        "/home/dionipe/apps/bijios-desktop/packaging/deb/usr/share/bijios-desktop/pancer-bashrc",
+    ];
+    let rc_path = rc_candidates
+        .iter()
+        .find(|p| std::path::Path::new(p).is_file())
+        .copied();
+    let c_rcflag = cstr("--rcfile");
+    let c_rcpath = cstr(rc_path.unwrap_or(""));
+    let argv_rc = [c_shell.as_ptr(), c_rcflag.as_ptr(), c_rcpath.as_ptr(), std::ptr::null()];
+    let argv_plain = [c_shell.as_ptr(), std::ptr::null()];
+    let argv_ptr = if rc_path.is_some() {
+        argv_rc.as_ptr()
+    } else {
+        argv_plain.as_ptr()
+    };
     vte_terminal_spawn_async(
         vte,
         0,
         c_wd.as_ptr(),
-        argv.as_ptr(),
+        argv_ptr,
         std::ptr::null(),
         0,
         std::ptr::null_mut(),

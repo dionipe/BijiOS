@@ -1,0 +1,73 @@
+# BijiOS Pancer — Enhanced Interactive Bash Configuration
+# Features: Smart Auto-Completion (bash-completion + Readline) & Live Ghost Auto-Suggestions (ble.sh)
+
+# 1. Load user's existing ~/.bashrc first (preserves PATH, aliases, custom exports)
+if [ -f "${HOME}/.bashrc" ]; then
+  # shellcheck disable=SC1091
+  source "${HOME}/.bashrc"
+fi
+
+# 2. Clean BijiOS Prompt (sets OSC title for Pancer Dynamic Host Tab Bar)
+PS1='\[\e]0;\u@\h: \w\a\]\[\e[1;32m\]\u@\h\[\e[0m\]:\[\e[1;33m\]\w\[\e[0m\]\$ '
+
+# 3. Persistent, deduplicated, shared command history
+export HISTSIZE=10000
+export HISTFILESIZE=20000
+export HISTCONTROL=ignoreboth:erasedups
+shopt -s histappend
+shopt -s checkwinsize
+shopt -s cdspell 2>/dev/null || true
+
+# 4. System-wide bash-completion (git, apt, systemctl, docker, ssh hosts, flags)
+if ! shopt -oq posix; then
+  if [ -f /usr/share/bash-completion/bash_completion ]; then
+    # shellcheck disable=SC1091
+    source /usr/share/bash-completion/bash_completion
+  elif [ -f /etc/bash_completion ]; then
+    # shellcheck disable=SC1091
+    source /etc/bash_completion
+  fi
+fi
+
+# 5. Smart Case-Insensitive Readline Auto-Completion + Up/Down History Prefix Search
+if [[ $- == *i* ]]; then
+  bind 'set completion-ignore-case on' 2>/dev/null || true
+  bind 'set completion-map-case on' 2>/dev/null || true
+  bind 'set show-all-if-ambiguous on' 2>/dev/null || true
+  bind 'set show-all-if-unmodified on' 2>/dev/null || true
+  bind 'set colored-stats on' 2>/dev/null || true
+  bind 'set colored-completion-prefix on' 2>/dev/null || true
+  bind 'set mark-symlinked-directories on' 2>/dev/null || true
+  bind 'set menu-complete-display-prefix on' 2>/dev/null || true
+  bind '"\e[A": history-search-backward' 2>/dev/null || true
+  bind '"\e[B": history-search-forward' 2>/dev/null || true
+  bind '"\e[Z": menu-complete-backward' 2>/dev/null || true
+fi
+
+# 6. Real-Time Fish/Zsh-Style Inline Ghost Auto-Suggestions & Syntax Highlighting (ble.sh)
+if [[ $- == *i* ]]; then
+  for _ble_path in \
+    /usr/share/bijios-desktop/blesh/ble.sh \
+    /home/dionipe/apps/bijios-desktop/packaging/deb/usr/share/bijios-desktop/blesh/ble.sh; do
+    if [ -f "${_ble_path}" ]; then
+      # shellcheck disable=SC1090
+      source "${_ble_path}" --noattach
+      # BijiOS Hutan Malam / Hijau Muda / Emas Benih visual tuning
+      bleopt complete_auto_complete=1 2>/dev/null || true
+      bleopt complete_auto_history=1 2>/dev/null || true
+      bleopt complete_auto_delay=80 2>/dev/null || true
+      bleopt complete_ambiguous=1 2>/dev/null || true
+      bleopt complete_menu_complete=1 2>/dev/null || true
+      bleopt complete_menu_filter=1 2>/dev/null || true
+      bleopt exec_errexit_mark= 2>/dev/null || true
+      bleopt prompt_eol_mark='' 2>/dev/null || true
+      ble-face auto_complete='fg=244,italic' 2>/dev/null || true
+      ble-face syntax_command='fg=114,bold' 2>/dev/null || true
+      ble-face syntax_error='fg=203' 2>/dev/null || true
+      ble-face syntax_quoted='fg=215' 2>/dev/null || true
+      ble-face region_match='bg=23,fg=230' 2>/dev/null || true
+      ble-attach
+      break
+    fi
+  done
+fi
