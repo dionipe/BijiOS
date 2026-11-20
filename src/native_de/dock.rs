@@ -205,14 +205,15 @@ pub fn sync_openbox_margins(auto_hide: bool, position: &str, dock_size: i32) {
         out.push('\n');
     }
 
-    if out != orig && fs::write(&rc_path, &out).is_ok() {
-        let _ = Command::new("openbox")
-            .arg("--reconfigure")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+    if out != orig {
+        let _ = fs::write(&rc_path, &out);
     }
+    let _ = Command::new("openbox")
+        .arg("--reconfigure")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// Position the floating above-all Dock window flush at the configured screen edge (Bottom / Left / Right).
