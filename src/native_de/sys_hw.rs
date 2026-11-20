@@ -661,6 +661,245 @@ unsafe fn open_wifi_connect_dialog(
     gtk_window_present(dlg);
 }
 
+fn is_valid_ipv4(s: &str) -> bool {
+    let parts: Vec<&str> = s.trim().split('.').collect();
+    parts.len() == 4 && parts.iter().all(|p| !p.is_empty() && p.parse::<u8>().is_ok())
+}
+
+unsafe fn open_ethernet_ip_dialog(
+    app: *mut GtkApplication,
+    dev: NetDeviceInfo,
+    status_lbl: *mut GtkWidget,
+    on_done: Rc<RefCell<Box<dyn Fn()>>>,
+) {
+    let dlg = create_app_window(app, &format!("⚙️ Configure IPv4 — {}", dev.device), 460, 410);
+    gtk_window_set_resizable(dlg, 0);
+    gtk_window_set_modal(dlg, 1);
+
+    let root = new_box(GTK_ORIENTATION_VERTICAL, 12, &[]);
+    set_margin_all(root, 20);
+
+    let hdr = new_label(&format!("🔌 IPv4 Configuration ({})", dev.device), &["app-heading"]);
+    gtk_label_set_xalign(hdr, 0.0);
+    gtk_box_append(root, hdr);
+
+    let sub = new_label(
+        "Switch between Automatic (DHCP) or Manual (Static IPv4). Changes apply immediately.",
+        &["app-muted"],
+    );
+    gtk_label_set_xalign(sub, 0.0);
+    gtk_label_set_wrap(sub, 1);
+    gtk_box_append(root, sub);
+
+    // Mode Toggle: Manual (Static) vs Automatic (DHCP)
+    let is_manual = Rc::new(Cell::new(true));
+    let mode_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    let btn_manual = new_button("📌 Manual (Static IP)", &["seg-btn-active"]);
+    let btn_dhcp = new_button("⚡ Automatic (DHCP)", &["seg-btn"]);
+    gtk_box_append(mode_row, btn_manual);
+    gtk_box_append(mode_row, btn_dhcp);
+    gtk_box_append(root, mode_row);
+
+    // Pre-fill from current interface IP/CIDR, Gateway & DNS
+    let (cur_ip, cur_prefix) = if let Some((ip, pfx)) = dev.ipv4.split_once('/') {
+        (ip.to_string(), pfx.to_string())
+    } else if dev.ipv4 != "—" {
+        (dev.ipv4.clone(), "24".to_string())
+    } else {
+        (String::new(), "24".to_string())
+    };
+    let (cur_gw, cur_dns) = read_default_gateway_and_dns();
+
+    let mk_field = |label: &str, init_val: &str, placeholder: &str| -> (*mut GtkWidget, *mut GtkWidget) {
+        let row = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &[]);
+        let l = new_label(label, &["kv-key"]);
+        gtk_label_set_xalign(l, 0.0);
+        gtk_widget_set_size_request(l, 130, -1);
+        let e = gtk_entry_new();
+        gtk_widget_set_hexpand(e, 1);
+        let ph = cstr(placeholder);
+        gtk_entry_set_placeholder_text(e, ph.as_ptr());
+        if !init_val.is_empty() && init_val != "—" {
+            set_entry_text(e, init_val);
+        }
+        gtk_box_append(row, l);
+        gtk_box_append(row, e);
+        (row, e)
+    };
+
+    let (r_ip, e_ip) = mk_field("IPv4 Address", &cur_ip, "e.g. 192.168.202.10");
+    let (r_pfx, e_pfx) = mk_field("Subnet Prefix", &cur_prefix, "e.g. 24 (255.255.255.0)");
+    let (r_gw, e_gw) = mk_field("Default Gateway", &cur_gw, "e.g. 192.168.202.1");
+    let (r_dns, e_dns) = mk_field("DNS Servers", &cur_dns, "e.g. 1.1.1.1, 8.8.8.8");
+
+    let form_box = new_box(GTK_ORIENTATION_VERTICAL, 8, &["app-card"]);
+    gtk_box_append(form_box, r_ip);
+    gtk_box_append(form_box, r_pfx);
+    gtk_box_append(form_box, r_gw);
+    gtk_box_append(form_box, r_dns);
+    gtk_box_append(root, form_box);
+
+    let dlg_err = new_label("", &["finder-meta-lbl"]);
+    gtk_label_set_xalign(dlg_err, 0.0);
+    gtk_widget_set_visible(dlg_err, 0);
+    gtk_box_append(root, dlg_err);
+
+    {
+        let im = Rc::clone(&is_manual);
+        connect_signal(btn_manual, "clicked", move || {
+            im.set(true);
+            remove_css(btn_dhcp, "seg-btn-active");
+            add_css(btn_dhcp, "seg-btn");
+            remove_css(btn_manual, "seg-btn");
+            add_css(btn_manual, "seg-btn-active");
+            gtk_widget_set_sensitive(form_box, 1);
+        });
+    }
+    {
+        let im = Rc::clone(&is_manual);
+        connect_signal(btn_dhcp, "clicked", move || {
+            im.set(false);
+            remove_css(btn_manual, "seg-btn-active");
+            add_css(btn_manual, "seg-btn");
+            remove_css(btn_dhcp, "seg-btn");
+            add_css(btn_dhcp, "seg-btn-active");
+            gtk_widget_set_sensitive(form_box, 0);
+        });
+    }
+
+    let btn_row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    gtk_widget_set_halign(btn_row, GTK_ALIGN_END);
+    let btn_cancel = new_button("Cancel", &["toolbar-btn"]);
+    let btn_apply = new_button("💾 Apply IPv4", &["primary-btn"]);
+    gtk_box_append(btn_row, btn_cancel);
+    gtk_box_append(btn_row, btn_apply);
+    gtk_box_append(root, btn_row);
+
+    connect_signal(btn_cancel, "clicked", move || gtk_window_close(dlg));
+
+    let dev_name = dev.device.clone();
+    connect_signal(btn_apply, "clicked", move || {
+        let qdev = shell_quote(&dev_name);
+        if !is_manual.get() {
+            // Switch to Automatic (DHCP)
+            let script = format!(
+                "CONN=$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | awk -F: -v d={d} '$2==d{{print $1; exit}}'); \
+                 if [ -n \"$CONN\" ]; then \
+                   nmcli con mod \"$CONN\" ipv4.method auto ipv4.addresses \"\" ipv4.gateway \"\" ipv4.dns \"\" && nmcli con up \"$CONN\"; \
+                 else \
+                   rm -f /etc/network/interfaces.d/bijios-{d_raw}.cfg; \
+                   dhclient -r {d} 2>/dev/null || true; dhclient {d} 2>/dev/null || nmcli device connect {d}; \
+                 fi",
+                d = qdev,
+                d_raw = dev_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "")
+            );
+            if run_pkexec_sh(&script) {
+                set_label_text(status_lbl, &format!("✅ Switched '{}' to Automatic (DHCP).", dev_name));
+                (on_done.borrow())();
+                gtk_window_close(dlg);
+            } else {
+                set_label_text(dlg_err, "❌ Failed to switch to DHCP.");
+                gtk_widget_set_visible(dlg_err, 1);
+            }
+            return;
+        }
+
+        // Validate Manual Static IPv4
+        let ip = get_entry_text(e_ip).trim().to_string();
+        let pfx = get_entry_text(e_pfx).trim().parse::<u8>().unwrap_or(0);
+        let gw = get_entry_text(e_gw).trim().to_string();
+        let dns_raw = get_entry_text(e_dns);
+        let dns_list: Vec<String> = dns_raw
+            .split([',', ' '])
+            .map(|s| s.trim().to_string())
+            .filter(|s| is_valid_ipv4(s))
+            .collect();
+
+        if !is_valid_ipv4(&ip) {
+            set_label_text(dlg_err, "❌ Invalid IPv4 address (expected e.g. 192.168.202.10).");
+            gtk_widget_set_visible(dlg_err, 1);
+            return;
+        }
+        if !(1..=32).contains(&pfx) {
+            set_label_text(dlg_err, "❌ Subnet prefix must be between 1 and 32 (e.g. 24).");
+            gtk_widget_set_visible(dlg_err, 1);
+            return;
+        }
+        if !gw.is_empty() && !is_valid_ipv4(&gw) {
+            set_label_text(dlg_err, "❌ Invalid Default Gateway IPv4 address.");
+            gtk_widget_set_visible(dlg_err, 1);
+            return;
+        }
+
+        let cidr = format!("{}/{}", ip, pfx);
+        let qcidr = shell_quote(&cidr);
+        let qgw = shell_quote(&gw);
+        let qdns_nm = shell_quote(&dns_list.join(" "));
+        let safe_dev = dev_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "");
+
+        let mut resolv_cmds = String::new();
+        if !dns_list.is_empty() {
+            let mut rc_txt = String::new();
+            for d in &dns_list {
+                rc_txt.push_str(&format!("nameserver {}\n", d));
+            }
+            resolv_cmds = format!("printf %s {} > /etc/resolv.conf;", shell_quote(&rc_txt));
+        }
+
+        let gw_nm = if gw.is_empty() {
+            "ipv4.gateway \"\"".to_string()
+        } else {
+            format!("ipv4.gateway {}", qgw)
+        };
+        let gw_ip_cmd = if gw.is_empty() {
+            String::new()
+        } else {
+            format!("ip route replace default via {} dev {};", qgw, qdev)
+        };
+        let dns_nm = if dns_list.is_empty() {
+            String::new()
+        } else {
+            format!("ipv4.dns {}", qdns_nm)
+        };
+
+        let script = format!(
+            "CONN=$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | awk -F: -v d={d} '$2==d{{print $1; exit}}'); \
+             if [ -n \"$CONN\" ]; then \
+               nmcli con mod \"$CONN\" ipv4.method manual ipv4.addresses {cidr} {gw_nm} {dns_nm} && nmcli con up \"$CONN\"; \
+             else \
+               ip addr flush dev {d} && ip addr add {cidr} dev {d} && ip link set {d} up; \
+               {gw_ip_cmd} \
+               {resolv_cmds} \
+               if [ -d /etc/network/interfaces.d ]; then \
+                 printf 'auto {sdev}\\niface {sdev} inet static\\n  address {cidr_raw}\\n' > /etc/network/interfaces.d/bijios-{sdev}.cfg; \
+                 if [ -n {qgw} ]; then printf '  gateway %s\\n' {qgw} >> /etc/network/interfaces.d/bijios-{sdev}.cfg; fi; \
+               fi; \
+             fi",
+            d = qdev,
+            cidr = qcidr,
+            cidr_raw = cidr,
+            gw_nm = gw_nm,
+            dns_nm = dns_nm,
+            gw_ip_cmd = gw_ip_cmd,
+            resolv_cmds = resolv_cmds,
+            sdev = safe_dev,
+            qgw = qgw
+        );
+
+        if run_pkexec_sh(&script) {
+            set_label_text(status_lbl, &format!("✅ Applied Static IP {} on '{}'.", cidr, dev_name));
+            (on_done.borrow())();
+            gtk_window_close(dlg);
+        } else {
+            set_label_text(dlg_err, "❌ Failed to apply IPv4 configuration.");
+            gtk_widget_set_visible(dlg_err, 1);
+        }
+    });
+
+    gtk_window_set_child(dlg, root);
+    gtk_window_present(dlg);
+}
+
 // ============================================================================
 // PAGE: NETWORK (Ethernet Interfaces, Wi-Fi Scanner/Toggle, DNS & Diagnostics)
 // ============================================================================
@@ -779,6 +1018,17 @@ pub unsafe fn build_network_page(app: *mut GtkApplication) -> *mut GtkWidget {
                 gtk_box_append(col, top);
                 gtk_box_append(col, meta);
                 gtk_box_append(row, col);
+
+                if d.kind != "wifi" {
+                    let btn_ip = new_button("⚙️ Configure IP", &["primary-btn"]);
+                    gtk_widget_set_valign(btn_ip, GTK_ALIGN_CENTER);
+                    let d_clone = d.clone();
+                    let pn_ip = Rc::clone(&pop_n);
+                    connect_signal(btn_ip, "clicked", move || {
+                        open_ethernet_ip_dialog(app, d_clone.clone(), status_lbl, Rc::clone(&pn_ip));
+                    });
+                    gtk_box_append(row, btn_ip);
+                }
 
                 let btn_tog = new_button(if is_conn { "Disconnect" } else { "Connect" }, &["toolbar-btn"]);
                 gtk_widget_set_valign(btn_tog, GTK_ALIGN_CENTER);
