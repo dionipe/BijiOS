@@ -11,7 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, CStr};
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::rc::Rc;
 
 // ============================================================================
@@ -1133,12 +1133,14 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         let menu_edit = make_dropdown(54);
         let menu_shell = make_dropdown(100);
         let menu_help = make_dropdown(152);
+        let ctx_menu = make_dropdown(0);
 
         let any_menu_open = move || -> bool {
             gtk_widget_get_visible(menu_file) != 0
                 || gtk_widget_get_visible(menu_edit) != 0
                 || gtk_widget_get_visible(menu_shell) != 0
                 || gtk_widget_get_visible(menu_help) != 0
+                || gtk_widget_get_visible(ctx_menu) != 0
         };
 
         let hide_all_menus = move || {
@@ -1147,6 +1149,7 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             gtk_widget_set_visible(menu_edit, 0);
             gtk_widget_set_visible(menu_shell, 0);
             gtk_widget_set_visible(menu_help, 0);
+            gtk_widget_set_visible(ctx_menu, 0);
         };
 
         connect_signal(btn_file, "clicked", move || {
@@ -1956,6 +1959,22 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
             open_about_pancer(app, win);
         });
 
+        // Right-Click Terminal Context Menu (Copy, Paste, New Tab, Split V/H, Clear)
+        let ctx_copy = new_menu_item("📋", "Copy", "Ctrl+Shift+C");
+        let ctx_paste = new_menu_item("📥", "Paste", "Ctrl+Shift+V");
+        let ctx_new_tab = new_menu_item("➕", "New Tab", "Ctrl+Shift+T");
+        let ctx_split_v = new_menu_item("◫", "Split Vertical", "Ctrl+Shift+D");
+        let ctx_split_h = new_menu_item("⬓", "Split Horizontal", "Ctrl+Shift+E");
+        let ctx_clear = new_menu_item("🧹", "Clear", "Ctrl+Shift+K");
+        gtk_box_append(ctx_menu, ctx_copy);
+        gtk_box_append(ctx_menu, ctx_paste);
+        gtk_box_append(ctx_menu, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+        gtk_box_append(ctx_menu, ctx_new_tab);
+        gtk_box_append(ctx_menu, ctx_split_v);
+        gtk_box_append(ctx_menu, ctx_split_h);
+        gtk_box_append(ctx_menu, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+        gtk_box_append(ctx_menu, ctx_clear);
+
         let wire = |btn: *mut GtkWidget, f: &Rc<dyn Fn()>| {
             let fc = Rc::clone(f);
             connect_signal(btn, "clicked", move || fc());
@@ -1975,6 +1994,22 @@ pub fn open_pancer_with_dir(app: *mut GtkApplication, initial_dir: Option<PathBu
         wire(btn_broadcast, &act_toggle_broadcast);
         wire(mi_close_tab, &act_close_tab);
         wire(btn_add_tab, &act_new_tab);
+
+        wire(ctx_copy, &act_copy);
+        wire(ctx_paste, &act_paste);
+        wire(ctx_new_tab, &act_new_tab);
+        wire(ctx_split_v, &act_split_v);
+        wire(ctx_split_h, &act_split_h);
+        wire(ctx_clear, &act_clear);
+
+        // Capture right-click anywhere inside the terminal stack (all tabs & split panes)
+        connect_right_click(stack, move |x, y| {
+            hide_all_menus();
+            let (ox, oy) = widget_point_in_overlay(stack, overlay, x, y, 250, 236);
+            set_margins(ctx_menu, oy, 0, ox, 0);
+            gtk_widget_set_visible(menu_backdrop, 1);
+            gtk_widget_set_visible(ctx_menu, 1);
+        });
 
         // ---------------------------------------------------------------------
         // Global Capture-Phase Hotkeys (Ctrl+Shift+<Key> + Escape)

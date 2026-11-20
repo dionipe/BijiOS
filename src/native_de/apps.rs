@@ -227,10 +227,270 @@ fn read_sshfs_mounts() -> Vec<(String, PathBuf)> {
     mounts
 }
 
+#[derive(Clone)]
+enum AkarClipOp {
+    Copy(PathBuf),
+    Move(PathBuf),
+}
+
+#[derive(Clone)]
+struct AkarTab {
+    id: u32,
+    dir: PathBuf,
+}
+
+fn copy_path_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    if src.is_dir() {
+        fs::create_dir_all(dst)?;
+        for ent in fs::read_dir(src)? {
+            let ent = ent?;
+            let child_src = ent.path();
+            let child_dst = dst.join(ent.file_name());
+            copy_path_recursive(&child_src, &child_dst)?;
+        }
+        Ok(())
+    } else {
+        fs::copy(src, dst).map(|_| ())
+    }
+}
+
+fn unique_dest_path(dir: &std::path::Path, name: &str) -> PathBuf {
+    let cand = dir.join(name);
+    if !cand.exists() {
+        return cand;
+    }
+    let p = std::path::Path::new(name);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or(name);
+    let ext = p.extension().and_then(|s| s.to_str());
+    for i in 1..1000 {
+        let suffix = if i == 1 {
+            " (copy)".to_string()
+        } else {
+            format!(" (copy {})", i)
+        };
+        let fname = match ext {
+            Some(e) if !e.is_empty() => format!("{}{}.{}", stem, suffix, e),
+            _ => format!("{}{}", stem, suffix),
+        };
+        let next = dir.join(fname);
+        if !next.exists() {
+            return next;
+        }
+    }
+    dir.join(format!("{}_copy", name))
+}
+
+fn move_path_safe(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    if fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+    copy_path_recursive(src, dst)?;
+    if src.is_dir() {
+        fs::remove_dir_all(src)
+    } else {
+        fs::remove_file(src)
+    }
+}
+
+unsafe fn open_akar_name_dialog(
+    app: *mut GtkApplication,
+    parent_win: *mut GtkWidget,
+    title: &str,
+    prompt: &str,
+    initial: &str,
+    btn_label: &str,
+    on_submit: Box<dyn Fn(String)>,
+) {
+    let dlg = create_app_window(app, title, 400, 168);
+    gtk_window_set_resizable(dlg, 0);
+    gtk_window_set_modal(dlg, 1);
+    gtk_window_set_transient_for(dlg, parent_win);
+
+    let root = new_box(GTK_ORIENTATION_VERTICAL, 10, &[]);
+    set_margin_all(root, 16);
+
+    let lbl = new_label(prompt, &["app-section-title"]);
+    gtk_label_set_xalign(lbl, 0.0);
+    let entry = gtk_entry_new();
+    set_entry_text(entry, initial);
+
+    let btns = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+    gtk_widget_set_halign(btns, GTK_ALIGN_END);
+    let btn_cancel = new_button("Cancel", &["toolbar-btn"]);
+    let btn_ok = new_button(btn_label, &["primary-btn"]);
+    gtk_box_append(btns, btn_cancel);
+    gtk_box_append(btns, btn_ok);
+
+    gtk_box_append(root, lbl);
+    gtk_box_append(root, entry);
+    gtk_box_append(root, btns);
+
+    connect_signal(btn_cancel, "clicked", move || gtk_window_close(dlg));
+
+    let submit_cb: Rc<dyn Fn()> = Rc::new(move || {
+        let name = get_entry_text(entry).trim().to_string();
+        if !name.is_empty() && !name.contains('/') {
+            on_submit(name);
+            gtk_window_close(dlg);
+        }
+    });
+    {
+        let sc = Rc::clone(&submit_cb);
+        connect_signal(btn_ok, "clicked", move || sc());
+    }
+    {
+        let sc = Rc::clone(&submit_cb);
+        connect_signal(entry, "activate", move || sc());
+    }
+
+    gtk_window_set_child(dlg, root);
+    gtk_window_present(dlg);
+    gtk_widget_grab_focus(entry);
+}
+
+fn open_item_in_app(app: *mut GtkApplication, p_open: &PathBuf) {
+    let lower = p_open.to_string_lossy().to_lowercase();
+    if lower.ends_with(".docx") || lower.ends_with(".doc") || lower.ends_with(".odt") || lower.ends_with(".rtf") {
+        open_wordcraft(app, Some(p_open.clone()));
+    } else if lower.ends_with(".xlsx") || lower.ends_with(".xls") || lower.ends_with(".csv") || lower.ends_with(".ods") {
+        open_gridcraft_with_file(app, Some(p_open.clone()));
+    } else if lower.ends_with(".pptx") || lower.ends_with(".ppt") || lower.ends_with(".odp") {
+        open_deckcraft(Some(p_open.clone()));
+    } else if lower.ends_with(".pdf") {
+        open_pdfcraft(Some(p_open.clone()));
+    } else if lower.ends_with(".txt") || lower.ends_with(".md") || lower.ends_with(".rs") || lower.ends_with(".json") || lower.ends_with(".toon") {
+        open_wordcraft(app, Some(p_open.clone()));
+    } else {
+        let _ = Command::new("xdg-open")
+            .arg(p_open)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+    }
+}
+
 pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
     unsafe {
-        let win = create_app_window(app, "📁  Akar - File Manager", 980, 620);
+        let win = create_app_window(app, "📁  Akar - File Manager", 1000, 640);
+        let overlay = gtk_overlay_new();
+        let win_col = new_box(GTK_ORIENTATION_VERTICAL, 0, &[]);
+        gtk_widget_set_hexpand(win_col, 1);
+        gtk_widget_set_vexpand(win_col, 1);
+        gtk_overlay_set_child(overlay, win_col);
+
+        // ---------------------------------------------------------------------
+        // 1. Akar Menu Bar (File | Edit                    [Clipboard Badge])
+        // ---------------------------------------------------------------------
+        let menubar = new_box(GTK_ORIENTATION_HORIZONTAL, 4, &["akar-menubar"]);
+        let btn_file = new_button("File", &["akar-menu-btn"]);
+        let btn_edit = new_button("Edit", &["akar-menu-btn"]);
+        let mb_spacer = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+        gtk_widget_set_hexpand(mb_spacer, 1);
+        let clip_badge = new_label("", &["akar-clip-badge"]);
+        gtk_widget_set_visible(clip_badge, 0);
+
+        gtk_box_append(menubar, btn_file);
+        gtk_box_append(menubar, btn_edit);
+        gtk_box_append(menubar, mb_spacer);
+        gtk_box_append(menubar, clip_badge);
+        gtk_box_append(win_col, menubar);
+
+        // Transparent click-outside backdrop for dropdown & context menus
+        let menu_backdrop = gtk_button_new();
+        add_css(menu_backdrop, "pancer-menu-backdrop");
+        gtk_widget_set_hexpand(menu_backdrop, 1);
+        gtk_widget_set_vexpand(menu_backdrop, 1);
+        gtk_widget_set_halign(menu_backdrop, GTK_ALIGN_FILL);
+        gtk_widget_set_valign(menu_backdrop, GTK_ALIGN_FILL);
+        gtk_widget_set_visible(menu_backdrop, 0);
+        gtk_overlay_add_overlay(overlay, menu_backdrop);
+
+        let make_dropdown = |margin_start: i32| -> *mut GtkWidget {
+            let panel = new_box(GTK_ORIENTATION_VERTICAL, 2, &["akar-dropdown"]);
+            gtk_widget_set_halign(panel, GTK_ALIGN_START);
+            gtk_widget_set_valign(panel, GTK_ALIGN_START);
+            set_margins(panel, 28, 0, margin_start, 0);
+            gtk_widget_set_size_request(panel, 224, -1);
+            gtk_widget_set_visible(panel, 0);
+            gtk_overlay_add_overlay(overlay, panel);
+            panel
+        };
+
+        let menu_file = make_dropdown(8);
+        let menu_edit = make_dropdown(54);
+        let ctx_menu = make_dropdown(0);
+
+        let any_menu_open = move || -> bool {
+            gtk_widget_get_visible(menu_file) != 0
+                || gtk_widget_get_visible(menu_edit) != 0
+                || gtk_widget_get_visible(ctx_menu) != 0
+        };
+
+        let hide_all_menus = move || {
+            gtk_widget_set_visible(menu_backdrop, 0);
+            gtk_widget_set_visible(menu_file, 0);
+            gtk_widget_set_visible(menu_edit, 0);
+            gtk_widget_set_visible(ctx_menu, 0);
+        };
+
+        connect_signal(menu_backdrop, "clicked", move || {
+            hide_all_menus();
+        });
+        connect_signal(btn_file, "clicked", move || {
+            let vis = gtk_widget_get_visible(menu_file) != 0;
+            hide_all_menus();
+            if !vis {
+                gtk_widget_set_visible(menu_backdrop, 1);
+                gtk_widget_set_visible(menu_file, 1);
+            }
+        });
+        connect_signal(btn_edit, "clicked", move || {
+            let vis = gtk_widget_get_visible(menu_edit) != 0;
+            hide_all_menus();
+            if !vis {
+                gtk_widget_set_visible(menu_backdrop, 1);
+                gtk_widget_set_visible(menu_edit, 1);
+            }
+        });
+
+        let new_menu_item = |icon: &str, text: &str, accel: &str| -> *mut GtkWidget {
+            let btn = gtk_button_new();
+            add_css(btn, "akar-menu-item");
+            let row = new_box(GTK_ORIENTATION_HORIZONTAL, 8, &[]);
+            gtk_widget_set_hexpand(row, 1);
+            let ic = new_label(icon, &[]);
+            let lbl = new_label(text, &[]);
+            gtk_label_set_xalign(lbl, 0.0);
+            gtk_widget_set_hexpand(lbl, 1);
+            let acc = new_label(accel, &["akar-accel"]);
+            gtk_label_set_xalign(acc, 1.0);
+            gtk_box_append(row, ic);
+            gtk_box_append(row, lbl);
+            gtk_box_append(row, acc);
+            gtk_button_set_child(btn, row);
+            btn
+        };
+
+        // ---------------------------------------------------------------------
+        // 2. Multi-Tab Bar (| 📁 Home × | 📁 Documents × | + |)
+        // ---------------------------------------------------------------------
+        let tabbar = new_box(GTK_ORIENTATION_HORIZONTAL, 5, &["akar-tabbar"]);
+        let tabs_box = new_box(GTK_ORIENTATION_HORIZONTAL, 4, &[]);
+        let btn_add_tab = new_button("+", &["akar-add-tab"]);
+        let tip_at = cstr("New Tab (Ctrl+T)");
+        gtk_widget_set_tooltip_text(btn_add_tab, tip_at.as_ptr());
+        gtk_box_append(tabbar, tabs_box);
+        gtk_box_append(tabbar, btn_add_tab);
+        gtk_box_append(win_col, tabbar);
+
+        // ---------------------------------------------------------------------
+        // 3. Split Body: [ Sidebar | Main Area ]
+        // ---------------------------------------------------------------------
         let root = new_box(GTK_ORIENTATION_HORIZONTAL, 0, &[]);
+        gtk_widget_set_hexpand(root, 1);
+        gtk_widget_set_vexpand(root, 1);
+        gtk_box_append(win_col, root);
 
         // Sidebar
         let sidebar = new_box(GTK_ORIENTATION_VERTICAL, 3, &["app-sidebar"]);
@@ -240,9 +500,37 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
         gtk_label_set_xalign(sb_hdr1, 0.0);
         gtk_box_append(sidebar, sb_hdr1);
 
-        let cur_dir: Rc<RefCell<PathBuf>> = Rc::new(RefCell::new(
-            if start_dir.is_dir() { start_dir } else { home_dir() },
-        ));
+        let init_dir = if start_dir.is_dir() { start_dir } else { home_dir() };
+        let cur_dir: Rc<RefCell<PathBuf>> = Rc::new(RefCell::new(init_dir.clone()));
+        let selected_path: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+        let clipboard: Rc<RefCell<Option<AkarClipOp>>> = Rc::new(RefCell::new(None));
+        let tabs: Rc<RefCell<Vec<AkarTab>>> = Rc::new(RefCell::new(vec![AkarTab {
+            id: 1,
+            dir: init_dir,
+        }]));
+        let active_tab_id: Rc<std::cell::Cell<u32>> = Rc::new(std::cell::Cell::new(1));
+        let next_tab_id: Rc<std::cell::Cell<u32>> = Rc::new(std::cell::Cell::new(2));
+
+        let update_clip_badge: Rc<dyn Fn()> = {
+            let cb = Rc::clone(&clipboard);
+            Rc::new(move || {
+                match cb.borrow().as_ref() {
+                    Some(AkarClipOp::Copy(p)) => {
+                        let nm = p.file_name().and_then(|s| s.to_str()).unwrap_or("item");
+                        set_label_text(clip_badge, &format!("📋 Copy: {}", nm));
+                        gtk_widget_set_visible(clip_badge, 1);
+                    }
+                    Some(AkarClipOp::Move(p)) => {
+                        let nm = p.file_name().and_then(|s| s.to_str()).unwrap_or("item");
+                        set_label_text(clip_badge, &format!("✂️ Move: {}", nm));
+                        gtk_widget_set_visible(clip_badge, 1);
+                    }
+                    None => {
+                        gtk_widget_set_visible(clip_badge, 0);
+                    }
+                }
+            })
+        };
 
         // Main area
         let main_col = new_box(GTK_ORIENTATION_VERTICAL, 0, &[]);
@@ -261,7 +549,7 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
         set_entry_text(path_entry, &cur_dir.borrow().to_string_lossy());
 
         let btn_new_folder = new_button("+ Folder", &["toolbar-btn"]);
-        let tip_nf = cstr("Create New Folder");
+        let tip_nf = cstr("Create New Folder (Ctrl+Shift+N)");
         gtk_widget_set_tooltip_text(btn_new_folder, tip_nf.as_ptr());
 
         let btn_new_doc = new_button("+ New Doc", &["primary-btn"]);
@@ -316,16 +604,411 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
         gtk_center_box_set_end_widget(status_bar, status_right);
         gtk_box_append(main_col, status_bar);
 
-        // Populate directory function
+        // Forward-declared closures for populate & tab bar rebuild
         let populate: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
+        let rebuild_tabs: Rc<RefCell<Box<dyn Fn()>>> = Rc::new(RefCell::new(Box::new(|| {})));
+
+        // Core File / Edit Actions (shared by Menu Bar, Context Menu & Hotkeys)
+        let act_new_folder: Rc<dyn Fn()> = {
+            let cd = Rc::clone(&cur_dir);
+            let pp = Rc::clone(&populate);
+            Rc::new(move || {
+                hide_all_menus();
+                let base = cd.borrow().clone();
+                let pp2 = Rc::clone(&pp);
+                open_akar_name_dialog(
+                    app,
+                    win,
+                    "📁 New Folder",
+                    "Enter new folder name:",
+                    "New Folder",
+                    "Create",
+                    Box::new(move |name| {
+                        let target = unique_dest_path(&base, &name);
+                        let _ = fs::create_dir_all(&target);
+                        (pp2.borrow())();
+                    }),
+                );
+            })
+        };
+
+        let act_new_tab: Rc<dyn Fn()> = {
+            let tbs = Rc::clone(&tabs);
+            let aid = Rc::clone(&active_tab_id);
+            let nid = Rc::clone(&next_tab_id);
+            let cd = Rc::clone(&cur_dir);
+            let sel = Rc::clone(&selected_path);
+            let pp = Rc::clone(&populate);
+            let rt = Rc::clone(&rebuild_tabs);
+            Rc::new(move || {
+                hide_all_menus();
+                let id = nid.get();
+                nid.set(id + 1);
+                let dir = cd.borrow().clone();
+                tbs.borrow_mut().push(AkarTab { id, dir: dir.clone() });
+                aid.set(id);
+                *cd.borrow_mut() = dir;
+                *sel.borrow_mut() = None;
+                (rt.borrow())();
+                (pp.borrow())();
+            })
+        };
+
+        let act_copy: Rc<dyn Fn()> = {
+            let sel = Rc::clone(&selected_path);
+            let cb = Rc::clone(&clipboard);
+            let ucb = Rc::clone(&update_clip_badge);
+            Rc::new(move || {
+                hide_all_menus();
+                if let Some(p) = sel.borrow().clone() {
+                    *cb.borrow_mut() = Some(AkarClipOp::Copy(p));
+                    ucb();
+                }
+            })
+        };
+
+        let act_move: Rc<dyn Fn()> = {
+            let sel = Rc::clone(&selected_path);
+            let cb = Rc::clone(&clipboard);
+            let ucb = Rc::clone(&update_clip_badge);
+            Rc::new(move || {
+                hide_all_menus();
+                if let Some(p) = sel.borrow().clone() {
+                    *cb.borrow_mut() = Some(AkarClipOp::Move(p));
+                    ucb();
+                }
+            })
+        };
+
+        let act_paste: Rc<dyn Fn()> = {
+            let cd = Rc::clone(&cur_dir);
+            let cb = Rc::clone(&clipboard);
+            let ucb = Rc::clone(&update_clip_badge);
+            let pp = Rc::clone(&populate);
+            Rc::new(move || {
+                hide_all_menus();
+                let op = cb.borrow().clone();
+                let Some(op) = op else { return; };
+                let dest_dir = cd.borrow().clone();
+                match op {
+                    AkarClipOp::Copy(src) => {
+                        if let Some(fname) = src.file_name().and_then(|s| s.to_str()) {
+                            let dst = unique_dest_path(&dest_dir, fname);
+                            let _ = copy_path_recursive(&src, &dst);
+                        }
+                    }
+                    AkarClipOp::Move(src) => {
+                        if let Some(fname) = src.file_name().and_then(|s| s.to_str()) {
+                            let dst = unique_dest_path(&dest_dir, fname);
+                            if move_path_safe(&src, &dst).is_ok() {
+                                *cb.borrow_mut() = None;
+                                ucb();
+                            }
+                        }
+                    }
+                }
+                (pp.borrow())();
+            })
+        };
+
+        let act_rename: Rc<dyn Fn()> = {
+            let sel = Rc::clone(&selected_path);
+            let pp = Rc::clone(&populate);
+            Rc::new(move || {
+                hide_all_menus();
+                let Some(target) = sel.borrow().clone() else { return; };
+                let cur_name = target
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                let parent = target.parent().map(|p| p.to_path_buf());
+                let Some(parent) = parent else { return; };
+                let pp2 = Rc::clone(&pp);
+                let sel2 = Rc::clone(&sel);
+                open_akar_name_dialog(
+                    app,
+                    win,
+                    "✏️ Rename Item",
+                    &format!("Rename \"{}\" to:", cur_name),
+                    &cur_name,
+                    "Rename",
+                    Box::new(move |new_name| {
+                        let new_path = parent.join(&new_name);
+                        if new_path != target && fs::rename(&target, &new_path).is_ok() {
+                            *sel2.borrow_mut() = Some(new_path);
+                            (pp2.borrow())();
+                        }
+                    }),
+                );
+            })
+        };
+
+        let act_delete: Rc<dyn Fn()> = {
+            let sel = Rc::clone(&selected_path);
+            let pp = Rc::clone(&populate);
+            Rc::new(move || {
+                hide_all_menus();
+                let Some(target) = sel.borrow_mut().take() else { return; };
+                if target.is_dir() {
+                    let _ = fs::remove_dir_all(&target);
+                } else {
+                    let _ = fs::remove_file(&target);
+                }
+                (pp.borrow())();
+            })
+        };
+
+        // Helper: show right-click context menu (for an item or empty space)
+        let show_ctx_menu: Rc<dyn Fn(*mut GtkWidget, f64, f64, Option<(PathBuf, bool)>)> = {
+            let cd = Rc::clone(&cur_dir);
+            let sel = Rc::clone(&selected_path);
+            let pp = Rc::clone(&populate);
+            let f_nf = Rc::clone(&act_new_folder);
+            let f_nt = Rc::clone(&act_new_tab);
+            let f_cp = Rc::clone(&act_copy);
+            let f_mv = Rc::clone(&act_move);
+            let f_ps = Rc::clone(&act_paste);
+            let f_rn = Rc::clone(&act_rename);
+            let f_dl = Rc::clone(&act_delete);
+            Rc::new(move |src_widget, x, y, item_opt| {
+                hide_all_menus();
+                clear_box_children(ctx_menu);
+
+                if let Some((path, is_dir)) = item_opt {
+                    *sel.borrow_mut() = Some(path.clone());
+
+                    let mi_open = new_menu_item("📂", "Open", "");
+                    let mi_cp = new_menu_item("📋", "Copy", "Ctrl+C");
+                    let mi_mv = new_menu_item("✂️", "Move (Cut)", "Ctrl+X");
+                    let mi_ps = new_menu_item("📥", "Paste", "Ctrl+V");
+                    let mi_rn = new_menu_item("✏️", "Rename", "F2");
+                    let mi_dl = new_menu_item("🗑️", "Delete", "Del");
+                    let mi_nf = new_menu_item("📁", "New Folder", "Ctrl+Shift+N");
+                    let mi_nt = new_menu_item("➕", "New Tab", "Ctrl+T");
+
+                    gtk_box_append(ctx_menu, mi_open);
+                    gtk_box_append(ctx_menu, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+                    gtk_box_append(ctx_menu, mi_cp);
+                    gtk_box_append(ctx_menu, mi_mv);
+                    gtk_box_append(ctx_menu, mi_ps);
+                    gtk_box_append(ctx_menu, mi_rn);
+                    gtk_box_append(ctx_menu, mi_dl);
+                    gtk_box_append(ctx_menu, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+                    gtk_box_append(ctx_menu, mi_nf);
+                    gtk_box_append(ctx_menu, mi_nt);
+
+                    {
+                        let p_o = path.clone();
+                        let cd_o = Rc::clone(&cd);
+                        let pp_o = Rc::clone(&pp);
+                        connect_signal(mi_open, "clicked", move || {
+                            hide_all_menus();
+                            if is_dir {
+                                *cd_o.borrow_mut() = p_o.clone();
+                                (pp_o.borrow())();
+                            } else {
+                                open_item_in_app(app, &p_o);
+                            }
+                        });
+                    }
+                    {
+                        let f = Rc::clone(&f_cp);
+                        connect_signal(mi_cp, "clicked", move || f());
+                    }
+                    {
+                        let f = Rc::clone(&f_mv);
+                        connect_signal(mi_mv, "clicked", move || f());
+                    }
+                    {
+                        let f = Rc::clone(&f_ps);
+                        connect_signal(mi_ps, "clicked", move || f());
+                    }
+                    {
+                        let f = Rc::clone(&f_rn);
+                        connect_signal(mi_rn, "clicked", move || f());
+                    }
+                    {
+                        let f = Rc::clone(&f_dl);
+                        connect_signal(mi_dl, "clicked", move || f());
+                    }
+                    {
+                        let f = Rc::clone(&f_nf);
+                        connect_signal(mi_nf, "clicked", move || f());
+                    }
+                    {
+                        let f = Rc::clone(&f_nt);
+                        connect_signal(mi_nt, "clicked", move || f());
+                    }
+
+                    let (ox, oy) = widget_point_in_overlay(src_widget, overlay, x, y, 228, 290);
+                    set_margins(ctx_menu, oy, 0, ox, 0);
+                } else {
+                    let mi_nf = new_menu_item("📁", "New Folder", "Ctrl+Shift+N");
+                    let mi_ps = new_menu_item("📥", "Paste", "Ctrl+V");
+                    let mi_nt = new_menu_item("➕", "New Tab", "Ctrl+T");
+                    let mi_rf = new_menu_item("🔄", "Refresh", "");
+
+                    gtk_box_append(ctx_menu, mi_nf);
+                    gtk_box_append(ctx_menu, mi_ps);
+                    gtk_box_append(ctx_menu, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+                    gtk_box_append(ctx_menu, mi_nt);
+                    gtk_box_append(ctx_menu, mi_rf);
+
+                    {
+                        let f = Rc::clone(&f_nf);
+                        connect_signal(mi_nf, "clicked", move || f());
+                    }
+                    {
+                        let f = Rc::clone(&f_ps);
+                        connect_signal(mi_ps, "clicked", move || f());
+                    }
+                    {
+                        let f = Rc::clone(&f_nt);
+                        connect_signal(mi_nt, "clicked", move || f());
+                    }
+                    {
+                        let pp_r = Rc::clone(&pp);
+                        connect_signal(mi_rf, "clicked", move || {
+                            hide_all_menus();
+                            (pp_r.borrow())();
+                        });
+                    }
+
+                    let (ox, oy) = widget_point_in_overlay(src_widget, overlay, x, y, 228, 150);
+                    set_margins(ctx_menu, oy, 0, ox, 0);
+                }
+
+                gtk_widget_set_visible(menu_backdrop, 1);
+                gtk_widget_set_visible(ctx_menu, 1);
+            })
+        };
+
+        // Rebuild Tab Bar closure
+        {
+            let tbs = Rc::clone(&tabs);
+            let aid = Rc::clone(&active_tab_id);
+            let cd = Rc::clone(&cur_dir);
+            let sel = Rc::clone(&selected_path);
+            let pp = Rc::clone(&populate);
+            let rt_self = Rc::clone(&rebuild_tabs);
+            *rebuild_tabs.borrow_mut() = Box::new(move || {
+                clear_box_children(tabs_box);
+                let cur_id = aid.get();
+                let snapshot = tbs.borrow().clone();
+                let multi = snapshot.len() > 1;
+                for tab in snapshot {
+                    let is_act = tab.id == cur_id;
+                    let pill = new_box(
+                        GTK_ORIENTATION_HORIZONTAL,
+                        2,
+                        &[if is_act { "akar-tab-pill-active" } else { "akar-tab-pill" }],
+                    );
+                    let title = tab
+                        .dir
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| format!("📁 {}", s))
+                        .unwrap_or_else(|| "💻 /".to_string());
+                    let btn = new_button(&title, &["akar-tab-btn"]);
+                    gtk_box_append(pill, btn);
+
+                    {
+                        let tid = tab.id;
+                        let tdir = tab.dir.clone();
+                        let aid_c = Rc::clone(&aid);
+                        let cd_c = Rc::clone(&cd);
+                        let sel_c = Rc::clone(&sel);
+                        let pp_c = Rc::clone(&pp);
+                        let rt_c = Rc::clone(&rt_self);
+                        connect_signal(btn, "clicked", move || {
+                            hide_all_menus();
+                            aid_c.set(tid);
+                            *cd_c.borrow_mut() = tdir.clone();
+                            *sel_c.borrow_mut() = None;
+                            (rt_c.borrow())();
+                            (pp_c.borrow())();
+                        });
+                    }
+
+                    if multi {
+                        let btn_x = new_button("×", &["akar-tab-close"]);
+                        gtk_box_append(pill, btn_x);
+                        let tid = tab.id;
+                        let tbs_c = Rc::clone(&tbs);
+                        let aid_c = Rc::clone(&aid);
+                        let cd_c = Rc::clone(&cd);
+                        let sel_c = Rc::clone(&sel);
+                        let pp_c = Rc::clone(&pp);
+                        let rt_c = Rc::clone(&rt_self);
+                        connect_signal(btn_x, "clicked", move || {
+                            hide_all_menus();
+                            let next_dir = {
+                                let mut list = tbs_c.borrow_mut();
+                                if list.len() <= 1 {
+                                    return;
+                                }
+                                if let Some(pos) = list.iter().position(|t| t.id == tid) {
+                                    list.remove(pos);
+                                }
+                                if aid_c.get() == tid {
+                                    let fallback = list.last().cloned();
+                                    if let Some(fb) = fallback {
+                                        aid_c.set(fb.id);
+                                        Some(fb.dir)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            };
+                            if let Some(d) = next_dir {
+                                *cd_c.borrow_mut() = d;
+                                *sel_c.borrow_mut() = None;
+                            }
+                            (rt_c.borrow())();
+                            (pp_c.borrow())();
+                        });
+                    }
+                    gtk_box_append(tabs_box, pill);
+                }
+            });
+        }
+
+        // Populate directory function
         let populate_clone = Rc::clone(&populate);
         let cur_dir_p = Rc::clone(&cur_dir);
+        let sel_p = Rc::clone(&selected_path);
+        let tbs_p = Rc::clone(&tabs);
+        let aid_p = Rc::clone(&active_tab_id);
+        let rt_p = Rc::clone(&rebuild_tabs);
+        let ctx_p = Rc::clone(&show_ctx_menu);
 
         *populate.borrow_mut() = Box::new(move || {
             clear_box_children(list_box);
             let dir = cur_dir_p.borrow().clone();
             set_entry_text(path_entry, &dir.to_string_lossy());
 
+            // Sync active tab's directory & label
+            {
+                let cur_id = aid_p.get();
+                let mut changed = false;
+                if let Ok(mut list) = tbs_p.try_borrow_mut() {
+                    if let Some(t) = list.iter_mut().find(|t| t.id == cur_id) {
+                        if t.dir != dir {
+                            t.dir = dir.clone();
+                            changed = true;
+                        }
+                    }
+                }
+                if changed {
+                    (rt_p.borrow())();
+                }
+            }
+
+            let cur_sel = sel_p.borrow().clone();
             let mut entries: Vec<(String, PathBuf, bool, u64)> = Vec::new();
             if let Ok(rd) = fs::read_dir(&dir) {
                 for ent in rd.flatten() {
@@ -346,14 +1029,21 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
             set_label_text(status_right, &format!("Location: {}", dir.display()));
 
             if entries.is_empty() {
-                let empty = new_label("This folder is empty.", &["app-muted"]);
+                let empty = new_label("This folder is empty. Right-click to create a folder or paste.", &["app-muted"]);
                 set_margin_all(empty, 28);
                 gtk_box_append(list_box, empty);
                 return;
             }
 
             for (idx, (name, path, is_dir, size)) in entries.into_iter().enumerate() {
-                let row_cls = if idx % 2 == 0 { "finder-row-even" } else { "finder-row-odd" };
+                let is_sel = cur_sel.as_ref() == Some(&path);
+                let row_cls = if is_sel {
+                    "finder-row-selected"
+                } else if idx % 2 == 0 {
+                    "finder-row-even"
+                } else {
+                    "finder-row-odd"
+                };
                 let row = new_box(GTK_ORIENTATION_HORIZONTAL, 10, &[row_cls]);
 
                 let lower = name.to_lowercase();
@@ -375,8 +1065,14 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
                     ("📄", "badge-file", "Document")
                 };
 
+                // Select toggle button (clicking badge selects folder/file for Edit menu)
+                let sel_btn = gtk_button_new();
+                add_css(sel_btn, "akar-tab-btn");
                 let badge = new_label(badge_txt, &["file-badge", badge_cls]);
                 gtk_widget_set_valign(badge, GTK_ALIGN_CENTER);
+                gtk_button_set_child(sel_btn, badge);
+                let tip_sel = cstr("Click to select item (or right-click row for menu)");
+                gtk_widget_set_tooltip_text(sel_btn, tip_sel.as_ptr());
 
                 let open_btn = new_left_button("", &name, &["finder-name-btn"]);
                 gtk_widget_set_hexpand(open_btn, 1);
@@ -402,46 +1098,55 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
                 let dt = cstr("Delete item");
                 gtk_widget_set_tooltip_text(del_btn, dt.as_ptr());
 
-                gtk_box_append(row, badge);
+                gtk_box_append(row, sel_btn);
                 gtk_box_append(row, open_btn);
                 gtk_box_append(row, size_lbl);
                 gtk_box_append(row, kind_lbl);
                 gtk_box_append(row, del_btn);
                 gtk_box_append(list_box, row);
 
+                // Left-click badge -> select/deselect item
+                {
+                    let sel_s = Rc::clone(&sel_p);
+                    let pop_s = Rc::clone(&populate_clone);
+                    let p_sel = path.clone();
+                    connect_signal(sel_btn, "clicked", move || {
+                        hide_all_menus();
+                        let same = sel_s.borrow().as_ref() == Some(&p_sel);
+                        *sel_s.borrow_mut() = if same { None } else { Some(p_sel.clone()) };
+                        (pop_s.borrow())();
+                    });
+                }
+
+                // Right-click row -> select item & show context menu
+                {
+                    let ctx_c = Rc::clone(&ctx_p);
+                    let p_rc = path.clone();
+                    connect_right_click(row, move |x, y| {
+                        ctx_c(row, x, y, Some((p_rc.clone(), is_dir)));
+                    });
+                }
+
                 let cur_dir_c = Rc::clone(&cur_dir_p);
+                let sel_o = Rc::clone(&sel_p);
                 let pop_c = Rc::clone(&populate_clone);
                 let p_open = path.clone();
                 connect_signal(open_btn, "clicked", move || {
+                    hide_all_menus();
                     if is_dir {
                         *cur_dir_c.borrow_mut() = p_open.clone();
+                        *sel_o.borrow_mut() = None;
                         (pop_c.borrow())();
                     } else {
-                        let lower = p_open.to_string_lossy().to_lowercase();
-                        if lower.ends_with(".docx") || lower.ends_with(".doc") || lower.ends_with(".odt") || lower.ends_with(".rtf") {
-                            open_wordcraft(app, Some(p_open.clone()));
-                        } else if lower.ends_with(".xlsx") || lower.ends_with(".xls") || lower.ends_with(".csv") || lower.ends_with(".ods") {
-                            open_gridcraft_with_file(app, Some(p_open.clone()));
-                        } else if lower.ends_with(".pptx") || lower.ends_with(".ppt") || lower.ends_with(".odp") {
-                            open_deckcraft(Some(p_open.clone()));
-                        } else if lower.ends_with(".pdf") {
-                            open_pdfcraft(Some(p_open.clone()));
-                        } else if lower.ends_with(".txt") || lower.ends_with(".md") || lower.ends_with(".rs") || lower.ends_with(".json") || lower.ends_with(".toon") {
-                            open_wordcraft(app, Some(p_open.clone()));
-                        } else {
-                            let _ = Command::new("xdg-open")
-                                .arg(&p_open)
-                                .stdin(Stdio::null())
-                                .stdout(Stdio::null())
-                                .stderr(Stdio::null())
-                                .spawn();
-                        }
+                        *sel_o.borrow_mut() = Some(p_open.clone());
+                        open_item_in_app(app, &p_open);
                     }
                 });
 
                 let pop_d = Rc::clone(&populate_clone);
                 let p_del = path.clone();
                 connect_signal(del_btn, "clicked", move || {
+                    hide_all_menus();
                     if is_dir {
                         let _ = fs::remove_dir_all(&p_del);
                     } else {
@@ -451,6 +1156,100 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
                 });
             }
         });
+
+        // Right-click on empty area of file list -> empty-space context menu
+        {
+            let ctx_e = Rc::clone(&show_ctx_menu);
+            connect_right_click_bubble(scroller, move |x, y| {
+                ctx_e(scroller, x, y, None);
+            });
+        }
+
+        // Populate File & Edit Menu Dropdowns
+        let mi_f_new_folder = new_menu_item("📁", "New Folder", "Ctrl+Shift+N");
+        let mi_f_new_tab = new_menu_item("➕", "New Tab", "Ctrl+T");
+        let mi_f_pancer = new_menu_item("💻", "Open in Pancer", "");
+        gtk_box_append(menu_file, mi_f_new_folder);
+        gtk_box_append(menu_file, mi_f_new_tab);
+        gtk_box_append(menu_file, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+        gtk_box_append(menu_file, mi_f_pancer);
+
+        let mi_e_copy = new_menu_item("📋", "Copy", "Ctrl+C");
+        let mi_e_move = new_menu_item("✂️", "Move (Cut)", "Ctrl+X");
+        let mi_e_paste = new_menu_item("📥", "Paste", "Ctrl+V");
+        let mi_e_rename = new_menu_item("✏️", "Rename", "F2");
+        let mi_e_delete = new_menu_item("🗑️", "Delete", "Del");
+        gtk_box_append(menu_edit, mi_e_copy);
+        gtk_box_append(menu_edit, mi_e_move);
+        gtk_box_append(menu_edit, mi_e_paste);
+        gtk_box_append(menu_edit, mi_e_rename);
+        gtk_box_append(menu_edit, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+        gtk_box_append(menu_edit, mi_e_delete);
+
+        let wire = |btn: *mut GtkWidget, f: &Rc<dyn Fn()>| {
+            let fc = Rc::clone(f);
+            connect_signal(btn, "clicked", move || fc());
+        };
+        wire(mi_f_new_folder, &act_new_folder);
+        wire(mi_f_new_tab, &act_new_tab);
+        wire(btn_add_tab, &act_new_tab);
+        wire(mi_e_copy, &act_copy);
+        wire(mi_e_move, &act_move);
+        wire(mi_e_paste, &act_paste);
+        wire(mi_e_rename, &act_rename);
+        wire(mi_e_delete, &act_delete);
+        {
+            let cd_p = Rc::clone(&cur_dir);
+            connect_signal(mi_f_pancer, "clicked", move || {
+                hide_all_menus();
+                crate::native_de::pancer::open_pancer_with_dir(app, Some(cd_p.borrow().clone()));
+            });
+        }
+
+        // Global Hotkeys for Akar (Esc, Ctrl+T, Ctrl+Shift+N, Ctrl+C/X/V, F2)
+        {
+            let f_nf = Rc::clone(&act_new_folder);
+            let f_nt = Rc::clone(&act_new_tab);
+            let f_cp = Rc::clone(&act_copy);
+            let f_mv = Rc::clone(&act_move);
+            let f_ps = Rc::clone(&act_paste);
+            let f_rn = Rc::clone(&act_rename);
+            let f_dl = Rc::clone(&act_delete);
+            connect_key_pressed(win, move |keyval, mods| {
+                if keyval == 0xff1b && any_menu_open() {
+                    hide_all_menus();
+                    return true;
+                }
+                // Don't hijack Ctrl+C/V/X while typing in path_entry
+                if gtk_widget_has_focus(path_entry) != 0 {
+                    return false;
+                }
+                if keyval == 0xffbf {
+                    // F2 -> Rename
+                    f_rn();
+                    return true;
+                }
+                if keyval == 0xffff {
+                    // Delete -> Delete selected item
+                    f_dl();
+                    return true;
+                }
+                let ctrl = (mods & 4) != 0;
+                let shift = (mods & 1) != 0;
+                if !ctrl {
+                    return false;
+                }
+                let ch = char::from_u32(keyval).map(|c| c.to_ascii_uppercase());
+                match (shift, ch) {
+                    (true, Some('N')) => { f_nf(); true }
+                    (false, Some('T')) => { f_nt(); true }
+                    (false, Some('C')) => { f_cp(); true }
+                    (false, Some('X')) => { f_mv(); true }
+                    (false, Some('V')) => { f_ps(); true }
+                    _ => false,
+                }
+            });
+        }
 
         // Sidebar shortcuts (left-aligned with Hijau Tunas active highlight!)
         let shortcuts = [
@@ -606,32 +1405,27 @@ pub fn open_finder_at(app: *mut GtkApplication, start_dir: PathBuf) {
             });
         }
         {
-            let cur_dir_nf = Rc::clone(&cur_dir);
-            let pop_nf = Rc::clone(&populate);
+            let f_nf = Rc::clone(&act_new_folder);
             connect_signal(btn_new_folder, "clicked", move || {
-                let base = cur_dir_nf.borrow().clone();
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-                    % 10000;
-                let _ = fs::create_dir_all(base.join(format!("New_Folder_{}", ts)));
-                (pop_nf.borrow())();
+                f_nf();
             });
         }
         connect_signal(btn_new_doc, "clicked", move || {
+            hide_all_menus();
             open_wordcraft(app, None);
         });
         {
             let pop_r = Rc::clone(&populate);
             connect_signal(btn_refresh, "clicked", move || {
+                hide_all_menus();
                 (pop_r.borrow())();
             });
         }
 
         gtk_box_append(root, sidebar);
         gtk_box_append(root, main_col);
-        gtk_window_set_child(win, root);
+        gtk_window_set_child(win, overlay);
+        (rebuild_tabs.borrow())();
         (populate.borrow())();
         gtk_window_present(win);
     }

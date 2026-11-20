@@ -303,6 +303,19 @@ extern "C" {
     pub fn gtk_overlay_set_child(overlay: *mut GtkWidget, child: *mut GtkWidget);
     pub fn gtk_overlay_add_overlay(overlay: *mut GtkWidget, widget: *mut GtkWidget);
 
+    // GtkGestureClick & Widget Geometry (Right-Click Context Menus)
+    pub fn gtk_gesture_click_new() -> *mut GtkWidget;
+    pub fn gtk_gesture_single_set_button(gesture: *mut GtkWidget, button: c_uint);
+    pub fn gtk_gesture_set_state(gesture: *mut GtkWidget, state: c_int) -> c_int;
+    pub fn gtk_widget_get_width(widget: *mut GtkWidget) -> c_int;
+    pub fn gtk_widget_get_height(widget: *mut GtkWidget) -> c_int;
+    pub fn gtk_widget_compute_point(
+        widget: *mut GtkWidget,
+        target: *mut GtkWidget,
+        point: *const GraphenePoint,
+        out_point: *mut GraphenePoint,
+    ) -> c_int;
+
     // GtkPopover & GtkMenuButton
     pub fn gtk_menu_button_new() -> *mut GtkWidget;
     pub fn gtk_menu_button_set_label(btn: *mut GtkWidget, label: *const c_char);
@@ -897,6 +910,90 @@ pub unsafe fn connect_key_pressed<F: FnMut(u32, u32) -> bool + 'static>(
         0,
     );
     gtk_widget_add_controller(widget, ctrl);
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct GraphenePoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+extern "C" fn trampoline_right_click(
+    gesture: *mut GtkWidget,
+    _n_press: c_int,
+    x: c_double,
+    y: c_double,
+    data: GPointer,
+) {
+    unsafe {
+        gtk_gesture_set_state(gesture, 1); // GTK_EVENT_SEQUENCE_CLAIMED
+    }
+    let cb: &mut Box<dyn FnMut(f64, f64)> =
+        unsafe { &mut *(data as *mut Box<dyn FnMut(f64, f64)>) };
+    cb(x, y);
+}
+
+extern "C" fn destroy_right_click(data: GPointer, _closure: GPointer) {
+    if !data.is_null() {
+        unsafe {
+            let _ = Box::from_raw(data as *mut Box<dyn FnMut(f64, f64)>);
+        }
+    }
+}
+
+/// Attach a capture-phase right-click (button 3) handler to any widget.
+pub unsafe fn connect_right_click<F: FnMut(f64, f64) + 'static>(widget: *mut GtkWidget, f: F) {
+    connect_right_click_phase(widget, 1, f); // GTK_PHASE_CAPTURE
+}
+
+/// Attach a bubble-phase right-click (button 3) handler (fires only if no child claimed it).
+pub unsafe fn connect_right_click_bubble<F: FnMut(f64, f64) + 'static>(widget: *mut GtkWidget, f: F) {
+    connect_right_click_phase(widget, 2, f); // GTK_PHASE_BUBBLE
+}
+
+unsafe fn connect_right_click_phase<F: FnMut(f64, f64) + 'static>(
+    widget: *mut GtkWidget,
+    phase: c_int,
+    f: F,
+) {
+    let g = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(g, 3); // Right mouse button
+    gtk_event_controller_set_propagation_phase(g, phase);
+    let boxed: Box<Box<dyn FnMut(f64, f64)>> = Box::new(Box::new(f));
+    let raw = Box::into_raw(boxed) as GPointer;
+    let sig = cstr("pressed");
+    g_signal_connect_data(
+        g,
+        sig.as_ptr(),
+        trampoline_right_click as GPointer,
+        raw,
+        destroy_right_click as GPointer,
+        0,
+    );
+    gtk_widget_add_controller(widget, g);
+}
+
+/// Convert a click point `(x, y)` inside `src` to clamped `(left, top)` margins inside `overlay`.
+pub unsafe fn widget_point_in_overlay(
+    src: *mut GtkWidget,
+    overlay: *mut GtkWidget,
+    x: f64,
+    y: f64,
+    menu_w: i32,
+    menu_h: i32,
+) -> (i32, i32) {
+    let pt = GraphenePoint {
+        x: x as f32,
+        y: y as f32,
+    };
+    let mut out = GraphenePoint { x: x as f32, y: y as f32 };
+    let _ = gtk_widget_compute_point(src, overlay, &pt, &mut out);
+    let ow = gtk_widget_get_width(overlay).max(menu_w + 16);
+    let oh = gtk_widget_get_height(overlay).max(menu_h + 16);
+    let left = (out.x as i32).clamp(6, (ow - menu_w - 8).max(6));
+    let top = (out.y as i32).clamp(6, (oh - menu_h - 8).max(6));
+    (left, top)
 }
 
 extern "C" fn trampoline_timer(data: GPointer) -> c_int {

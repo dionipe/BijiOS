@@ -987,6 +987,150 @@ button.pancer-sidebar-toggle:hover {
     padding: 5px 10px;
 }
 
+/* Akar File Manager: Menu Bar, Dropdowns, Context Menu, Tabs & Selection */
+.akar-menubar {
+    background-color: #F3EFE4;
+    border-bottom: 1px solid rgba(15, 61, 46, 0.12);
+    padding: 3px 8px;
+}
+
+button.akar-menu-btn {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: #0F3D2E;
+    border-radius: 6px;
+    padding: 2px 10px;
+    min-height: 22px;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+button.akar-menu-btn:hover {
+    background-color: rgba(47, 125, 79, 0.14);
+}
+
+.akar-dropdown {
+    background-color: rgba(252, 250, 245, 0.98);
+    border: 1px solid rgba(15, 61, 46, 0.22);
+    border-radius: 10px;
+    padding: 5px;
+    box-shadow: 0 12px 30px rgba(15, 61, 46, 0.22);
+}
+
+button.akar-menu-item {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: #0F3D2E;
+    border-radius: 7px;
+    padding: 5px 10px;
+    min-height: 24px;
+    font-size: 12px;
+    font-weight: 500;
+    box-shadow: none;
+}
+
+button.akar-menu-item:hover {
+    background-color: #2F7D4F;
+    color: #FFFFFF;
+}
+
+.akar-accel {
+    font-size: 10.5px;
+    color: rgba(15, 61, 46, 0.55);
+}
+
+button.akar-menu-item:hover .akar-accel {
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.akar-tabbar {
+    background-color: #EDE8DB;
+    border-bottom: 1px solid rgba(15, 61, 46, 0.12);
+    padding: 4px 8px;
+}
+
+.akar-tab-pill {
+    background-color: rgba(15, 61, 46, 0.06);
+    border: 1px solid rgba(15, 61, 46, 0.12);
+    border-radius: 7px;
+    padding: 1px 4px;
+}
+
+.akar-tab-pill-active {
+    background-color: #FFFFFF;
+    border: 1px solid rgba(47, 125, 79, 0.45);
+    border-radius: 7px;
+    padding: 1px 4px;
+    box-shadow: 0 1px 4px rgba(15, 61, 46, 0.10);
+}
+
+button.akar-tab-btn {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: #0F3D2E;
+    padding: 2px 6px;
+    min-height: 20px;
+    font-size: 11.5px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+button.akar-tab-close {
+    background-image: none;
+    background-color: transparent;
+    border: none;
+    color: rgba(15, 61, 46, 0.55);
+    border-radius: 5px;
+    padding: 0 4px;
+    min-width: 18px;
+    min-height: 18px;
+    font-size: 11px;
+    box-shadow: none;
+}
+
+button.akar-tab-close:hover {
+    background-color: rgba(220, 38, 38, 0.14);
+    color: #B91C1C;
+}
+
+button.akar-add-tab {
+    background-image: none;
+    background-color: rgba(47, 125, 79, 0.12);
+    border: 1px solid rgba(47, 125, 79, 0.25);
+    color: #0F3D2E;
+    border-radius: 6px;
+    padding: 1px 8px;
+    min-height: 22px;
+    font-size: 13px;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+button.akar-add-tab:hover {
+    background-color: #2F7D4F;
+    color: #FFFFFF;
+}
+
+.akar-clip-badge {
+    background-color: rgba(47, 125, 79, 0.14);
+    border: 1px solid rgba(47, 125, 79, 0.32);
+    color: #0F3D2E;
+    border-radius: 999px;
+    padding: 1px 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.finder-row-selected {
+    background-color: rgba(47, 125, 79, 0.18);
+    border-left: 3px solid #2F7D4F;
+    padding: 5px 12px 5px 9px;
+}
+
 .pancer-broadcast-badge {
     background-color: rgba(232, 163, 61, 0.22);
     border: 1px solid #E8A33D;
