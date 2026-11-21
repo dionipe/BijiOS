@@ -120,8 +120,18 @@ if ! curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
 fi
 
 # 3. Launch BijiOS Full Native Rust + GTK4 Desktop Shell (Zero Chromium!)
+DISP_SAFE="$(printf '%s' "${DISPLAY:-:0}" | tr ':.' '__')"
+LOGOUT_SENTINEL="/tmp/bijios-logout-${USER:-$(id -un)}-${DISP_SAFE}"
+rm -f "${LOGOUT_SENTINEL}" 2>/dev/null || true
+
 while true; do
   /usr/bin/bijios-desktop --shell || true
+
+  # If user explicitly clicked Log Out, exit session cleanly instead of respawning
+  if [ -f "${LOGOUT_SENTINEL}" ]; then
+    rm -f "${LOGOUT_SENTINEL}" 2>/dev/null || true
+    break
+  fi
 
   # Verify X server is still alive before respawning the native desktop shell
   if command -v xset >/dev/null 2>&1; then
@@ -133,3 +143,6 @@ while true; do
 done
 
 [ -n "${WM_PID:-}" ] && kill "${WM_PID}" 2>/dev/null || true
+if [ -n "${XDG_SESSION_ID:-}" ] && command -v loginctl >/dev/null 2>&1; then
+  loginctl terminate-session "${XDG_SESSION_ID}" 2>/dev/null || true
+fi

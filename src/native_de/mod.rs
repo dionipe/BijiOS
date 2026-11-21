@@ -89,16 +89,29 @@ pub fn authenticate_via_daemon(username: &str, password: &str) -> bool {
 
 pub fn trigger_power(action: &str) {
     if action == "logout" {
-        let _ = Command::new("sh")
-            .args([
-                "-c",
-                "openbox --exit || loginctl terminate-session \"$XDG_SESSION_ID\" || pkill -TERM -u \"$USER\" openbox",
-            ])
+        // 1. Gracefully close all open client application windows
+        unsafe {
+            for w in list_x11_client_windows() {
+                close_x11_window(w.xid);
+            }
+        }
+        // 2. Write per-display logout sentinel so bijios-session exits instead of respawning
+        let disp = std::env::var("DISPLAY")
+            .unwrap_or_else(|_| ":0".to_string())
+            .replace(':', "_")
+            .replace('.', "_");
+        let user = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+        let sentinel = format!("/tmp/bijios-logout-{}-{}", user, disp);
+        let _ = fs::write(&sentinel, "logout\n");
+
+        // 3. Exit Openbox for this DISPLAY & terminate bijios-desktop shell cleanly
+        let _ = Command::new("openbox")
+            .arg("--exit")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn();
-        return;
+            .status();
+        std::process::exit(0);
     }
     let cmd = match action {
         "sleep" => "suspend",
@@ -106,8 +119,11 @@ pub fn trigger_power(action: &str) {
         "poweroff" => "poweroff",
         _ => return,
     };
-    let _ = Command::new("systemctl")
-        .arg(cmd)
+    let _ = Command::new("sh")
+        .args([
+            "-c",
+            &format!("systemctl {0} || sudo -n systemctl {0}", cmd),
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
